@@ -1,171 +1,153 @@
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
+import pandas as pd
+from pathlib import Path
+from tqdm import tqdm
+import logging
+from .common import (detect_features, match_features, geometric_verification, 
+                   verify_match_quality, visualize_geometric_verification)
 
-def match_two_images(img1, img2, plot=False):
-    
-    # Convert to grayscale
-    gray1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
-    gray2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
-    
-    # Initialize FAST detector
-    fast = cv2.FastFeatureDetector_create(
-        threshold=20,           # Detect keypoints with higher contrast
-        nonmaxSuppression=True  # Remove nearby points
-    )
-    
-    # Detect keypoints
-    kp1 = fast.detect(gray1)
-    kp2 = fast.detect(gray2)
-    
-    # Compute descriptors
-    orb = cv2.ORB_create(
-        nfeatures=10000,        # Increase max features
-        scaleFactor=1.2,        # Pyramid decimation ratio
-        nlevels=8,              # Number of pyramid levels
-        edgeThreshold=31,       # Size of border where features are not detected
-        firstLevel=0,           # The level of pyramid to put source image to
-        WTA_K=2,                # Number of points that produce each element of the descriptor
-        scoreType=cv2.ORB_HARRIS_SCORE,
-        patchSize=31            # Size of the patch used by the oriented BRIEF descriptor
-    )
-    
-    # Compute descriptors
-    kp1, des1 = orb.compute(gray1, kp1)
-    kp2, des2 = orb.compute(gray2, kp2)
-    
-    print(f"Features detected in image 1: {len(kp1)}")
-    print(f"Features detected in image 2: {len(kp2)}")
-    
-    # Initialize FLANN matcher
-    FLANN_INDEX_LSH = 6
-    index_params = dict(algorithm=FLANN_INDEX_LSH,
-                        table_number=6,
-                        key_size=12,
-                        multi_probe_level=1)
-    search_params = dict(checks=50)
-    
-    flann = cv2.FlannBasedMatcher(index_params, search_params)
-    
-    # Match descriptors using kNN
-    matches = flann.knnMatch(des1, des2, k=2)
-    
-    # Apply Lowe's ratio test
-    good_matches = []
-    for m, n in matches:
-        if m.distance < 0.7 * n.distance:
-            good_matches.append(m)
-    
-    print(f"Number of good matches: {len(good_matches)}")
-    
-    # Get matched keypoints
-    src_pts = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-    dst_pts = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-    
-    # Use RANSAC to find inliers
-    F, mask = cv2.findFundamentalMat(src_pts, dst_pts, cv2.FM_RANSAC, 3.0)
-    inlier_matches = [m for i, m in enumerate(good_matches) if mask[i]]
-    
-    print(f"Number of inlier matches: {len(inlier_matches)}")
-    
-    # Draw matches
-    if plot:
-        match_img = cv2.drawMatches(
-            img1, kp1, 
-            img2, kp2, 
-            inlier_matches, None,
-            flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS
-        )
+class ImageMatcher:
+    def __init__(self, data_dir):
+        self.data_dir = Path(data_dir)
+        self.image_dir = self.data_dir / 'images'
+        self.matches_dir = self.data_dir / 'matches'
+        self.fund_dir = self.data_dir / 'fundamental'
+        self.corr_dir = self.data_dir / 'correspondences'
+        self.viz_dir = self.data_dir / 'visualizations'
         
-        plt.figure(figsize=(15, 8))
-        plt.imshow(cv2.cvtColor(match_img, cv2.COLOR_BGR2RGB))
-        plt.title(f'Inlier matches: {len(inlier_matches)}')
-        plt.axis('off')
-        plt.show()
+        # Create directories
+        for dir_path in [self.matches_dir, self.fund_dir, self.corr_dir, self.viz_dir]:
+            dir_path.mkdir(parents=True, exist_ok=True)
+        
+        self.results = []
     
-    return kp1, kp2, inlier_matches
+    def process_image_pair(self, img1_path, img2_path, pair_name):
+        """
+        Process a single image pair with geometric verification
+        """
+        # Read images
+        img1 = cv2.imread(str(img1_path))
+        img2 = cv2.imread(str(img2_path))
+        
+        if img1 is None or img2 is None:
+            raise ValueError(f"Could not read images: {img1_path}, {img2_path}")
+        
+        # Detect features
+        kp1, desc1 = detect_features(img1)
+        kp2, desc2 = detect_features(img2)
+        
+        if len(kp1) < 100 or len(kp2) < 100:  # Minimum features threshold
+            return None
+        
+        # Match features
+        matches = match_features(desc1, desc2)
+        
+        if len(matches) < 50:  # Minimum matches threshold
+            return None
+        
+        # Get matching points
+        pts1 = np.float32([kp1[m.queryIdx].pt for m in matches]).reshape(-1, 2)
+        pts2 = np.float32([kp2[m.trainIdx].pt for m in matches]).reshape(-1, 2)
+        
+        # Compute fundamental matrix
+        F, mask = cv2.findFundamentalMat(pts1, pts2, cv2.FM_RANSAC, 3.0)
+        
+        if F is None or F.shape != (3, 3):
+            return None
+        
+        # Perform geometric verification
+        geometric_results = geometric_verification(pts1, pts2, F)
+        
+        # Check if matches pass quality thresholds
+        if not verify_match_quality(geometric_results):
+            return None
+        
+        # Visualize results
+        viz_path = self.viz_dir / f'{pair_name}_verification.png'
+        visualize_geometric_verification(img1, img2, pts1, pts2, geometric_results, viz_path)
+        
+        # Get inlier matches using mask from geometric verification
+        inlier_mask = geometric_results['inlier_mask']
+        inlier_matches = [m for i, m in enumerate(matches) if inlier_mask[i]]
+        
+        # Save results
+        self.save_pair_data(pair_name, pts1, pts2, F, inlier_mask, matches)
+        
+        return {
+            'pair_name': pair_name,
+            'img1': img1_path.name,
+            'img2': img2_path.name,
+            'num_matches': len(matches),
+            'num_inliers': np.sum(inlier_mask),
+            'inlier_ratio': geometric_results['metrics']['inlier_ratio'],
+            'reprojection_error': geometric_results['metrics']['reprojection_error'],
+            'well_distributed': geometric_results['metrics']['well_distributed']
+        }
+    
+    def save_pair_data(self, pair_name, pts1, pts2, F, inlier_mask, matches):
+        """Save pair matching data with geometric verification results"""
+        # Save corresponding points (only inliers)
+        np.save(self.corr_dir / f'{pair_name}_pts1.npy', pts1[inlier_mask])
+        np.save(self.corr_dir / f'{pair_name}_pts2.npy', pts2[inlier_mask])
+        
+        # Save fundamental matrix and mask
+        np.savez(self.fund_dir / f'{pair_name}_F.npz',
+                F=F, mask=inlier_mask, pts1=pts1, pts2=pts2)
+        
+        # Save matches
+        np.savez(self.matches_dir / f'{pair_name}_matches.npz',
+                queryIdx=np.array([m.queryIdx for m in matches]),
+                trainIdx=np.array([m.trainIdx for m in matches]),
+                distance=np.array([m.distance for m in matches]),
+                inlier_mask=inlier_mask)
+    
+    def process_image_range(self, start_idx, end_idx):
+        """Process all image pairs in range"""
+        # Generate all possible pairs
+        pairs = []
+        for i in range(start_idx, end_idx):
+            for j in range(i+1, end_idx+1):
+                img1_path = self.image_dir / f'DSC0{i}.JPG'
+                img2_path = self.image_dir / f'DSC0{j}.JPG'
+                pair_name = f'pair_{i}_{j}'
+                pairs.append((img1_path, img2_path, pair_name))
+        
+        # Process all pairs with progress bar
+        for img1_path, img2_path, pair_name in tqdm(pairs, desc="Processing pairs"):
+            try:
+                result = self.process_image_pair(img1_path, img2_path, pair_name)
+                if result is not None:
+                    self.results.append(result)
+            except Exception as e:
+                logging.error(f"Error processing {pair_name}: {str(e)}")
+                continue
+    
+    def save_results(self, output_csv):
+        """Save matching results to CSV with geometric verification metrics"""
+        df = pd.DataFrame(self.results)
+        df.to_csv(output_csv, index=False)
+        logging.info(f"Results saved to {output_csv}")
+        
+        # Print summary
+        print("\nMatching Summary:")
+        print(f"Total pairs processed: {len(self.results)}")
+        print(f"Average matches per pair: {df['num_matches'].mean():.1f}")
+        print(f"Average inliers per pair: {df['num_inliers'].mean():.1f}")
+        print(f"Average inlier ratio: {df['inlier_ratio'].mean():.3f}")
+        print(f"Average reprojection error: {df['reprojection_error'].mean():.3f}")
+        print(f"Pairs with well-distributed points: {df['well_distributed'].sum()}")
 
-def visualize_standard_matches(img1, img2, kp1, kp2, matches):
-    """Standard OpenCV match visualization"""
-    match_img = cv2.drawMatches(
-        img1, kp1, img2, kp2, matches, None,
-        flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS
-    )
-    plt.figure(figsize=(15, 8))
-    plt.imshow(cv2.cvtColor(match_img, cv2.COLOR_BGR2RGB))
-    plt.title(f'Standard Match Visualization - {len(matches)} matches')
-    plt.axis('off')
-    plt.show()
-
-def visualize_colored_matches(img1, img2, kp1, kp2, matches):
-    """Detailed visualization with random colored lines"""
-    h1, w1 = img1.shape[:2]
-    h2, w2 = img2.shape[:2]
-    
-    # Create combined image
-    vis = np.zeros((max(h1, h2), w1 + w2, 3), dtype=np.uint8)
-    vis[:h1, :w1] = img1
-    vis[:h2, w1:w1+w2] = img2
-    
-    # Draw matches with random colors
-    np.random.seed(42)
-    for match in matches:
-        color = np.random.randint(0, 255, 3).tolist()
-        pt1 = tuple(map(int, kp1[match.queryIdx].pt))
-        pt2 = tuple(map(int, kp2[match.trainIdx].pt))
-        pt2 = (pt2[0] + w1, pt2[1])
-        
-        cv2.line(vis, pt1, pt2, color, 1, cv2.LINE_AA)
-        cv2.circle(vis, pt1, 3, color, -1)
-        cv2.circle(vis, pt2, 3, color, -1)
-    
-    plt.figure(figsize=(15, 8))
-    plt.imshow(cv2.cvtColor(vis, cv2.COLOR_BGR2RGB))
-    plt.title(f'Colored Match Visualization - {len(matches)} matches')
-    plt.axis('off')
-    plt.show()
-
-def visualize_flow(img1, img2, kp1, kp2, matches):
-    """Flow-like visualization"""
-    vis = img1.copy()
-    
-    for match in matches:
-        pt1 = tuple(map(int, kp1[match.queryIdx].pt))
-        pt2 = tuple(map(int, kp2[match.trainIdx].pt))
-        
-        # Calculate flow direction and magnitude
-        dx = pt2[0] - pt1[0]
-        dy = pt2[1] - pt1[1]
-        magnitude = np.sqrt(dx*dx + dy*dy)
-        
-        # Color based on direction and magnitude
-        angle = np.arctan2(dy, dx)
-        color = (
-            int(128 + 127*np.cos(angle)),
-            int(128 + 127*np.sin(angle)),
-            int(255 * (magnitude / max(img1.shape)))
-        )
-        
-        cv2.line(vis, pt1, pt2, color, 1, cv2.LINE_AA)
-    
-    plt.figure(figsize=(15, 8))
-    plt.imshow(cv2.cvtColor(vis, cv2.COLOR_BGR2RGB))
-    plt.title(f'Flow Visualization - {len(matches)} matches')
-    plt.axis('off')
-    plt.show()
-
+# Example usage:
 if __name__ == "__main__":
-    # Example usage
-    img1_path = '/Users/sovikghosh/Desktop/doc/3D/SFM/data/images/DSC01161.JPG'
-    img2_path = '/Users/sovikghosh/Desktop/doc/3D/SFM/data/images/DSC01162.JPG'
+    # Setup logging
+    logging.basicConfig(level=logging.INFO)
     
-
-    # Read images
-    img1 = cv2.imread(img1_path)
-    img2 = cv2.imread(img2_path)
-
-    # Call visualization functions
-    kp1, kp2, matches = match_two_images(img1, img2)
-    visualize_standard_matches(img1, img2, kp1, kp2, matches)
-    visualize_colored_matches(img1, img2, kp1, kp2, matches)
-    visualize_flow(img1, img2, kp1, kp2, matches)
+    # Initialize matcher
+    matcher = ImageMatcher("data")
+    
+    # Process images
+    matcher.process_image_range(1161, 1262)
+    
+    # Save results
+    matcher.save_results("data/pair_matches.csv")

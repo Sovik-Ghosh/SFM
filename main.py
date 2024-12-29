@@ -1,120 +1,196 @@
-from utils import matching
+import argparse
+import logging
+import time
+from pathlib import Path
 import cv2
 import numpy as np
-from pathlib import Path
 from tqdm import tqdm
-import csv
 
-CURR_DIR = Path(__file__).resolve().parent
+# Import all necessary components from utils package
+from utils import (
+    ImageMatcher,
+    SfMReconstruction,
+    run_bundle_adjustment,
+    visualize_cameras_and_points,
+    visualize_point_cloud,
+    DenseReconstruction,
+    save_reconstruction,
+    save_dense_reconstruction,
+    export_colmap_format
+)
 
-def save_pair_data(kp1, kp2, matches, pair_name, base_path="data"):
-    """
-    Save feature matching data for an image pair
-    """
-    # Create directory structure
-    data_dir = CURR_DIR / Path(base_path)
-    correspondences_dir = data_dir / "correspondences"
-    matches_dir = data_dir / "matches"
-    fundamental_dir = data_dir / "fundamental"
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Structure from Motion Pipeline')
     
-    # Create directories if they don't exist
-    for dir_path in [correspondences_dir, matches_dir, fundamental_dir]:
-        dir_path.mkdir(parents=True, exist_ok=True)
+    # Add subparsers for different operations
+    subparsers = parser.add_subparsers(dest='operation', help='Operation to perform')
     
-    if len(matches) > 0:
-        # Get corresponding points
-        pts1 = np.float32([kp1[m.queryIdx].pt for m in matches]).reshape(-1, 2)
-        pts2 = np.float32([kp2[m.trainIdx].pt for m in matches]).reshape(-1, 2)
+    # Preprocessing parser
+    preprocess_parser = subparsers.add_parser('preprocess', help='Run preprocessing')
+    preprocess_parser.add_argument('--data_dir', type=str, required=True,
+                                help='Path to data directory containing images')
+    preprocess_parser.add_argument('--start_idx', type=int, default=1161,
+                                help='Starting image index')
+    preprocess_parser.add_argument('--end_idx', type=int, default=1262,
+                                help='Ending image index')
+    preprocess_parser.add_argument('--visualize', action='store_true',
+                                help='Show preprocessing visualizations')
+    
+    # Reconstruction parser
+    reconstruct_parser = subparsers.add_parser('reconstruct', help='Run reconstruction')
+    reconstruct_parser.add_argument('--data_dir', type=str, required=True,
+                                help='Path to data directory containing preprocessed data')
+    reconstruct_parser.add_argument('--output_dir', type=str, required=True,
+                                help='Path to output directory')
+    reconstruct_parser.add_argument('--skip_dense', action='store_true',
+                                help='Skip dense reconstruction')
+    reconstruct_parser.add_argument('--visualize', action='store_true',
+                                help='Show reconstruction visualizations')
+    
+    # Full pipeline parser
+    pipeline_parser = subparsers.add_parser('pipeline', help='Run full pipeline')
+    pipeline_parser.add_argument('--data_dir', type=str, required=True,
+                              help='Path to data directory containing images')
+    pipeline_parser.add_argument('--output_dir', type=str, required=True,
+                              help='Path to output directory')
+    pipeline_parser.add_argument('--start_idx', type=int, default=1161,
+                              help='Starting image index')
+    pipeline_parser.add_argument('--end_idx', type=int, default=1262,
+                              help='Ending image index')
+    pipeline_parser.add_argument('--skip_dense', action='store_true',
+                              help='Skip dense reconstruction')
+    pipeline_parser.add_argument('--visualize', action='store_true',
+                              help='Show visualizations')
+    
+    return parser.parse_args()
+
+class SfMPipeline:
+    def __init__(self, args):
+        self.args = args
+        self.data_dir = Path(args.data_dir)
+        self.output_dir = Path(args.output_dir) if hasattr(args, 'output_dir') else None
         
-        # Compute Fundamental Matrix
-        F, mask = cv2.findFundamentalMat(pts1, pts2, cv2.FM_RANSAC, 3.0)
+        if self.output_dir:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            (self.output_dir / 'sparse').mkdir(exist_ok=True)
+            if not args.skip_dense:
+                (self.output_dir / 'dense').mkdir(exist_ok=True)
+    
+    def run_preprocessing(self):
+        """Run feature matching and geometric verification"""
+        logger.info("Starting preprocessing...")
+        start_time = time.time()
         
-        # Save all data
-        np.save(correspondences_dir / f"{pair_name}_pts1.npy", pts1)
-        np.save(correspondences_dir / f"{pair_name}_pts2.npy", pts2)
-        np.savez(matches_dir / f"{pair_name}_matches.npz", 
-                queryIdx=np.array([m.queryIdx for m in matches]),
-                trainIdx=np.array([m.trainIdx for m in matches]),
-                distance=np.array([m.distance for m in matches]))
-        np.savez(fundamental_dir / f"{pair_name}_F.npz", 
-                F=F, mask=mask, pts1=pts1, pts2=pts2)
-        
-        return F, mask, len(matches), np.sum(mask)
-    return None, None, 0, 0
-
-def generate_and_save_all_pairs(start=1161, end=1262, base_path="data"):
-    """
-    Generate all possible image pairs
-    """
-    pairs = []
-    total_pairs = ((end - start + 1) * (end - start)) // 2
-    
-    with tqdm(total=total_pairs, desc="Generating pairs") as pbar:
-        for i in range(start, end):
-            for j in range(i+1, end+1):
-                img1_path = CURR_DIR / Path(f"data/images/DSC0{i}.JPG")
-                img2_path = CURR_DIR / Path(f"data/images/DSC0{j}.JPG")
-                pair_name = f"pair_{i}_{j}"
-                pairs.append((img1_path, img2_path, pair_name))
-                pbar.update(1)
-    return pairs
-
-def process_all_pairs(pairs, csv_path='data/pair_matches.csv'):
-    """
-    Process all pairs using matching function and save to CSV
-    """
-    # Prepare CSV file
-    csv_file_path = CURR_DIR / csv_path
-    with open(csv_file_path, 'w', newline='') as csvfile:
-        csvwriter = csv.writer(csvfile)
-        # Write header
-        csvwriter.writerow(['Pair', 'Image1', 'Image2', 'Total Matches', 'Inlier Matches'])
-    
-    results = {}
-    
-    for img1_path, img2_path, pair_name in tqdm(pairs, desc="Processing pairs"):
         try:
-            # Read images
-            img1 = cv2.imread(img1_path)
-            img2 = cv2.imread(img2_path)
+            # Initialize matcher
+            matcher = ImageMatcher(self.data_dir)
             
-            if img1 is None or img2 is None:
-                tqdm.write(f"Error: Could not read images for {pair_name}")
-                continue
-                
-            # Get matches
-            kp1, kp2, matches = matching(img1, img2)
+            # Process image pairs
+            matcher.process_image_range(self.args.start_idx, self.args.end_idx)
             
-            # Save data
-            F, mask, num_matches, num_inliers = save_pair_data(kp1, kp2, matches, pair_name)
+            # Save results
+            matcher.save_results(self.data_dir / 'pair_matches.csv')
             
-            if F is not None:
-                # Append to CSV
-                with open(csv_file_path, 'a', newline='') as csvfile:
-                    csvwriter = csv.writer(csvfile)
-                    csvwriter.writerow([
-                        pair_name, 
-                        img1_path.name, 
-                        img2_path.name, 
-                        num_matches, 
-                        num_inliers
-                    ])
-                
-                results[pair_name] = {
-                    'F': F,
-                    'mask': mask,
-                    'num_matches': num_matches,
-                    'num_inliers': num_inliers
-                }
-                tqdm.write(f"{pair_name}: {num_matches} matches, {num_inliers} inliers")
-                
+            elapsed_time = time.time() - start_time
+            logger.info(f"Preprocessing completed in {elapsed_time:.2f} seconds!")
+            
         except Exception as e:
-            tqdm.write(f"Error processing {pair_name}: {e}")
-            continue
+            logger.error(f"Preprocessing failed: {str(e)}")
+            raise
     
-    return results
+    def run_reconstruction(self):
+        """Run SfM reconstruction"""
+        logger.info("Starting reconstruction...")
+        start_time = time.time()
+        
+        try:
+            # Initialize reconstruction
+            sfm = SfMReconstruction(self.data_dir)
+            reconstruction = sfm.reconstruct(self.data_dir / 'pair_matches.csv')
+            
+            # Visualize initial reconstruction
+            if self.args.visualize:
+                visualize_cameras_and_points(reconstruction)
+            
+            # Bundle adjustment
+            logger.info("Running bundle adjustment...")
+            reconstruction = run_bundle_adjustment(reconstruction)
+            
+            if self.args.visualize:
+                visualize_cameras_and_points(reconstruction)
+            
+            # Dense reconstruction
+            if not self.args.skip_dense:
+                logger.info("Starting dense reconstruction...")
+                dense = DenseReconstruction(reconstruction, self.data_dir)
+                
+                # Compute depth maps
+                dense.compute_depth_maps()
+                
+                # Create dense point cloud
+                points, colors = dense.create_dense_point_cloud()
+                
+                # Create mesh
+                mesh = dense.create_mesh(points, dense.estimate_normals(points))
+                
+                if self.args.visualize:
+                    visualize_point_cloud(points, colors)
+            
+            # Save results
+            logger.info("Saving reconstruction results...")
+            save_reconstruction(reconstruction, self.output_dir / 'sparse')
+            
+            if not self.args.skip_dense:
+                save_dense_reconstruction(points, colors, mesh, self.output_dir / 'dense')
+            
+            # Export to COLMAP format
+            export_colmap_format(reconstruction, self.output_dir / 'colmap')
+            
+            elapsed_time = time.time() - start_time
+            logger.info(f"Reconstruction completed in {elapsed_time:.2f} seconds!")
+            
+        except Exception as e:
+            logger.error(f"Reconstruction failed: {str(e)}")
+            raise
+    
+    def run_full_pipeline(self):
+        """Run complete pipeline including preprocessing and reconstruction"""
+        try:
+            # Run preprocessing
+            self.run_preprocessing()
+            
+            # Run reconstruction
+            self.run_reconstruction()
+            
+        except Exception as e:
+            logger.error(f"Pipeline failed: {str(e)}")
+            raise
 
-# Usage
+def main():
+    args = parse_args()
+    
+    try:
+        pipeline = SfMPipeline(args)
+        
+        if args.operation == 'preprocess':
+            pipeline.run_preprocessing()
+        elif args.operation == 'reconstruct':
+            pipeline.run_reconstruction()
+        elif args.operation == 'pipeline':
+            pipeline.run_full_pipeline()
+        else:
+            logger.error("Invalid operation specified")
+            
+    except Exception as e:
+        logger.error(f"Operation failed: {str(e)}")
+        raise
+
 if __name__ == "__main__":
-    pairs = generate_and_save_all_pairs(1161, 1262)
-    results = process_all_pairs(pairs)
+    main()
