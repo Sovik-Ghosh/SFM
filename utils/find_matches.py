@@ -8,27 +8,46 @@ def match_two_images(img1, img2, plot=False):
     gray1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
     gray2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
     
-    # Initialize SIFT detector
-    sift = cv2.SIFT_create(
-        nfeatures=0,            # 0 = unlimited features
-        contrastThreshold=0.01, # Lower threshold for more features
-        edgeThreshold=20
+    # Initialize FAST detector
+    fast = cv2.FastFeatureDetector_create(
+        threshold=20,           # Detect keypoints with higher contrast
+        nonmaxSuppression=True  # Remove nearby points
     )
     
-    # Detect and compute keypoints and descriptors
-    kp1, des1 = sift.detectAndCompute(gray1, None)
-    kp2, des2 = sift.detectAndCompute(gray2, None)
+    # Detect keypoints
+    kp1 = fast.detect(gray1)
+    kp2 = fast.detect(gray2)
+    
+    # Compute descriptors
+    orb = cv2.ORB_create(
+        nfeatures=10000,        # Increase max features
+        scaleFactor=1.2,        # Pyramid decimation ratio
+        nlevels=8,              # Number of pyramid levels
+        edgeThreshold=31,       # Size of border where features are not detected
+        firstLevel=0,           # The level of pyramid to put source image to
+        WTA_K=2,                # Number of points that produce each element of the descriptor
+        scoreType=cv2.ORB_HARRIS_SCORE,
+        patchSize=31            # Size of the patch used by the oriented BRIEF descriptor
+    )
+    
+    # Compute descriptors
+    kp1, des1 = orb.compute(gray1, kp1)
+    kp2, des2 = orb.compute(gray2, kp2)
     
     print(f"Features detected in image 1: {len(kp1)}")
     print(f"Features detected in image 2: {len(kp2)}")
     
     # Initialize FLANN matcher
-    FLANN_INDEX_KDTREE = 1
-    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+    FLANN_INDEX_LSH = 6
+    index_params = dict(algorithm=FLANN_INDEX_LSH,
+                        table_number=6,
+                        key_size=12,
+                        multi_probe_level=1)
     search_params = dict(checks=50)
+    
     flann = cv2.FlannBasedMatcher(index_params, search_params)
     
-    # Match descriptors
+    # Match descriptors using kNN
     matches = flann.knnMatch(des1, des2, k=2)
     
     # Apply Lowe's ratio test

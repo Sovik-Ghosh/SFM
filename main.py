@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
+import csv
 
 CURR_DIR = Path(__file__).resolve().parent
 
@@ -58,10 +59,17 @@ def generate_and_save_all_pairs(start=1161, end=1262, base_path="data"):
                 pbar.update(1)
     return pairs
 
-def process_all_pairs(pairs):
+def process_all_pairs(pairs, csv_path='data/pair_matches.csv'):
     """
-    Process all pairs using matching function
+    Process all pairs using matching function and save to CSV
     """
+    # Prepare CSV file
+    csv_file_path = CURR_DIR / csv_path
+    with open(csv_file_path, 'w', newline='') as csvfile:
+        csvwriter = csv.writer(csvfile)
+        # Write header
+        csvwriter.writerow(['Pair', 'Image1', 'Image2', 'Total Matches', 'Inlier Matches'])
+    
     results = {}
     
     for img1_path, img2_path, pair_name in tqdm(pairs, desc="Processing pairs"):
@@ -81,6 +89,17 @@ def process_all_pairs(pairs):
             F, mask, num_matches, num_inliers = save_pair_data(kp1, kp2, matches, pair_name)
             
             if F is not None:
+                # Append to CSV
+                with open(csv_file_path, 'a', newline='') as csvfile:
+                    csvwriter = csv.writer(csvfile)
+                    csvwriter.writerow([
+                        pair_name, 
+                        img1_path.name, 
+                        img2_path.name, 
+                        num_matches, 
+                        num_inliers
+                    ])
+                
                 results[pair_name] = {
                     'F': F,
                     'mask': mask,
