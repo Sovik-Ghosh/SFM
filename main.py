@@ -6,10 +6,9 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
-# Import all necessary components from utils package
 from utils import (
     ImageMatcher,
-    SfMReconstruction,
+    RobustSfM,
     run_bundle_adjustment,
     visualize_cameras_and_points,
     visualize_point_cloud,
@@ -19,7 +18,6 @@ from utils import (
     export_colmap_format
 )
 
-# Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -28,18 +26,18 @@ logger = logging.getLogger(__name__)
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Structure from Motion Pipeline')
-    
-    # Add subparsers for different operations
     subparsers = parser.add_subparsers(dest='operation', help='Operation to perform')
     
     # Preprocessing parser
     preprocess_parser = subparsers.add_parser('preprocess', help='Run preprocessing')
     preprocess_parser.add_argument('--data_dir', type=str, required=True,
                                 help='Path to data directory containing images')
-    preprocess_parser.add_argument('--start_idx', type=int, default=1161,
+    preprocess_parser.add_argument('--start_idx', type=int, default=0,
                                 help='Starting image index')
-    preprocess_parser.add_argument('--end_idx', type=int, default=1262,
+    preprocess_parser.add_argument('--end_idx', type=int, default=40,
                                 help='Ending image index')
+    preprocess_parser.add_argument('--min_matches', type=int, default=150,
+                                help='Minimum number of matches')
     preprocess_parser.add_argument('--visualize', action='store_true',
                                 help='Show preprocessing visualizations')
     
@@ -49,6 +47,12 @@ def parse_args():
                                 help='Path to data directory containing preprocessed data')
     reconstruct_parser.add_argument('--output_dir', type=str, required=True,
                                 help='Path to output directory')
+    reconstruct_parser.add_argument('--min_inliers', type=int, default=100,
+                                help='Minimum number of inliers for a valid match')
+    reconstruct_parser.add_argument('--min_inlier_ratio', type=float, default=0.5,
+                                help='Minimum inlier ratio for a valid match')
+    reconstruct_parser.add_argument('--good_inlier_ratio', type=float, default=0.8,
+                                help='Threshold for very good pairs')
     reconstruct_parser.add_argument('--skip_dense', action='store_true',
                                 help='Skip dense reconstruction')
     reconstruct_parser.add_argument('--visualize', action='store_true',
@@ -60,10 +64,16 @@ def parse_args():
                               help='Path to data directory containing images')
     pipeline_parser.add_argument('--output_dir', type=str, required=True,
                               help='Path to output directory')
-    pipeline_parser.add_argument('--start_idx', type=int, default=1161,
+    pipeline_parser.add_argument('--start_idx', type=int, default=0,
                               help='Starting image index')
-    pipeline_parser.add_argument('--end_idx', type=int, default=1262,
+    pipeline_parser.add_argument('--end_idx', type=int, default=40,
                               help='Ending image index')
+    pipeline_parser.add_argument('--min_inliers', type=int, default=100,
+                              help='Minimum number of inliers for a valid match')
+    pipeline_parser.add_argument('--min_inlier_ratio', type=float, default=0.5,
+                              help='Minimum inlier ratio for a valid match')
+    pipeline_parser.add_argument('--good_inlier_ratio', type=float, default=0.8,
+                              help='Threshold for very good pairs')
     pipeline_parser.add_argument('--skip_dense', action='store_true',
                               help='Skip dense reconstruction')
     pipeline_parser.add_argument('--visualize', action='store_true',
@@ -77,11 +87,19 @@ class SfMPipeline:
         self.data_dir = Path(args.data_dir)
         self.output_dir = Path(args.output_dir) if hasattr(args, 'output_dir') else None
         
+        # Create directory structure
         if self.output_dir:
             self.output_dir.mkdir(parents=True, exist_ok=True)
             (self.output_dir / 'sparse').mkdir(exist_ok=True)
             if not args.skip_dense:
                 (self.output_dir / 'dense').mkdir(exist_ok=True)
+                
+        # Ensure required directories exist in data_dir
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        (self.data_dir / 'images').mkdir(exist_ok=True)
+        (self.data_dir / 'matches').mkdir(exist_ok=True)
+        (self.data_dir / 'fundamental').mkdir(exist_ok=True)
+        (self.data_dir / 'correspondences').mkdir(exist_ok=True)
     
     def run_preprocessing(self):
         """Run feature matching and geometric verification"""
@@ -89,8 +107,9 @@ class SfMPipeline:
         start_time = time.time()
         
         try:
-            # Initialize matcher
+            # Initialize matcher with parameters
             matcher = ImageMatcher(self.data_dir)
+            matcher.min_matches = self.args.min_matches if hasattr(self.args, 'min_matches') else 150
             
             # Process image pairs
             matcher.process_image_range(self.args.start_idx, self.args.end_idx)
@@ -106,38 +125,35 @@ class SfMPipeline:
             raise
     
     def run_reconstruction(self):
-        """Run SfM reconstruction"""
+        """Run SfM reconstruction using RobustSfM"""
         logger.info("Starting reconstruction...")
         start_time = time.time()
         
         try:
-            # Initialize reconstruction
-            sfm = SfMReconstruction(self.data_dir)
-            reconstruction = sfm.reconstruct(self.data_dir / 'pair_matches.csv')
+            # Initialize RobustSfM with parameters
+            sfm = RobustSfM(self.data_dir)
             
-            # Visualize initial reconstruction
+            # Set parameters if provided
+            if hasattr(self.args, 'min_inliers'):
+                sfm.min_inliers = self.args.min_inliers
+            if hasattr(self.args, 'min_inlier_ratio'):
+                sfm.min_inlier_ratio = self.args.min_inlier_ratio
+            if hasattr(self.args, 'good_inlier_ratio'):
+                sfm.good_inlier_ratio = self.args.good_inlier_ratio
+            
+            # Run reconstruction
+            reconstruction = sfm.reconstruct(str(self.data_dir / 'pair_matches.csv'))
+            
+            # Visualize if requested
             if self.args.visualize:
+                logger.info("Visualizing reconstruction...")
                 visualize_cameras_and_points(reconstruction)
             
-            # Bundle adjustment
-            logger.info("Running bundle adjustment...")
-            reconstruction = run_bundle_adjustment(reconstruction)
-            
-            if self.args.visualize:
-                visualize_cameras_and_points(reconstruction)
-            
-            # Dense reconstruction
+            # Dense reconstruction if not skipped
             if not self.args.skip_dense:
                 logger.info("Starting dense reconstruction...")
                 dense = DenseReconstruction(reconstruction, self.data_dir)
-                
-                # Compute depth maps
-                dense.compute_depth_maps()
-                
-                # Create dense point cloud
                 points, colors = dense.create_dense_point_cloud()
-                
-                # Create mesh
                 mesh = dense.create_mesh(points, dense.estimate_normals(points))
                 
                 if self.args.visualize:

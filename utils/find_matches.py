@@ -7,9 +7,11 @@ import logging
 from .common import (detect_features, match_features, geometric_verification, 
                    verify_match_quality, visualize_geometric_verification)
 
+CURR_DIR = Path(__file__).resolve().parent
+
 class ImageMatcher:
     def __init__(self, data_dir):
-        self.data_dir = Path(data_dir)
+        self.data_dir = CURR_DIR.parent / Path(data_dir)
         self.image_dir = self.data_dir / 'images'
         self.matches_dir = self.data_dir / 'matches'
         self.fund_dir = self.data_dir / 'fundamental'
@@ -37,7 +39,7 @@ class ImageMatcher:
         kp1, desc1 = detect_features(img1)
         kp2, desc2 = detect_features(img2)
         
-        if len(kp1) < 100 or len(kp2) < 100:  # Minimum features threshold
+        if len(kp1) < 50 or len(kp2) < 50:  # Minimum features threshold
             return None
         
         # Match features
@@ -108,8 +110,8 @@ class ImageMatcher:
         pairs = []
         for i in range(start_idx, end_idx):
             for j in range(i+1, end_idx+1):
-                img1_path = self.image_dir / f'DSC0{i}.JPG'
-                img2_path = self.image_dir / f'DSC0{j}.JPG'
+                img1_path = self.image_dir / f"{i:06d}.jpg"
+                img2_path = self.image_dir / f"{j:06d}.jpg"
                 pair_name = f'pair_{i}_{j}'
                 pairs.append((img1_path, img2_path, pair_name))
         
@@ -147,7 +149,7 @@ if __name__ == "__main__":
     matcher = ImageMatcher("data")
     
     # Process images
-    matcher.process_image_range(1161, 1262)
+    matcher.process_image_range(0, 40)
     
     # Save results
     matcher.save_results("data/pair_matches.csv")

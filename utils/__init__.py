@@ -9,7 +9,7 @@ from .common import (
 )
 
 from .find_matches import ImageMatcher
-from .sfm_reconstruction import SfMReconstruction
+from .sfm_reconstruction import RobustSfM
 from .bundle_adjustment import run_bundle_adjustment
 from .visualization import (
     visualize_cameras_and_points,
