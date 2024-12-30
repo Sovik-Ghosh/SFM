@@ -400,7 +400,6 @@ FodyWeavers.xsd
 *.sln.iml
 
 /data/images/
-/data/visualizations/
 
 images.zip
 
