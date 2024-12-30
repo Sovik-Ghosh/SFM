@@ -401,3 +401,7 @@ FodyWeavers.xsd
 
 /data/images/
 /data/visualizations/
+
+images.zip
+
+test.py
