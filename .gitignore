@@ -399,8 +399,3 @@ FodyWeavers.xsd
 # JetBrains Rider
 *.sln.iml
 
-/data/images/
-
-images.zip
-
-test.py
