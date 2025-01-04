@@ -2,6 +2,10 @@
 
 A robust Structure from Motion (SfM) implementation for 3D reconstruction from image sequences.
 
+<p align="center">
+  <img src="./bunny_video.gif" alt="Demo" width="600"/>
+</p>
+
 ## Table of Contents
 
 - [Features](#features)
@@ -105,7 +109,11 @@ sfm/
 * Geometric verification
 * Match filtering
 
-![Feature Matching](SFM/bunny_data/visualizations/pair_7_24_matches.png)
+<p align="center">
+  <img src="./bunny_data/visualizations/pair_7_24_matches.png" alt="Feature Matching" width="600"/>
+  <br>
+  <em>Feature Matching between Images 7 and 24</em>
+</p>
 
 ### Reconstruction
 * Initial pair selection based on:
@@ -113,6 +121,12 @@ sfm/
   * Inlier ratio
   * Baseline length
   * Feature distribution
+
+<p align="center">
+  <img src="./utils/image_graph.png" alt="Feature Matching" width="600"/>
+  <br>
+  <em>Graph Network for next best image selection</em>
+</p>
 
 ### Output Structure
 
