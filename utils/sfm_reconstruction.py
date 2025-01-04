@@ -8,7 +8,7 @@ import sqlite3
 import scipy.optimize as optimize
 from collections import defaultdict
 import pandas as pd
-from image_selector import SfMGraphSelector
+from .image_selector import SfMGraphSelector
 
 # Constants for reconstruction parameters
 MATCHING_THRESHOLD = 2.0  # pixels

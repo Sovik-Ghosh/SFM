@@ -6,11 +6,34 @@ from pathlib import Path
 import cv2
 import numpy as np
 from tqdm import tqdm
+from logging.handlers import RotatingFileHandler 
 from utils import (
     SfMExporter,
     StructureFromMotion,
     ImageMatcher
 )
+
+# Setup global logger
+logger = logging.getLogger(__name__)
+
+def setup_logging(log_level):
+    """Setup logging configuration"""
+    # Configure logging with rotation
+    log_file = Path('logs') / f'sfm_pipeline_{time.strftime("%Y%m%d_%H%M%S")}.log'
+    log_file.parent.mkdir(exist_ok=True)
+    
+    logging.basicConfig(
+        level=getattr(logging, log_level),
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            RotatingFileHandler(
+                str(log_file),
+                maxBytes=10*1024*1024,  # 10MB
+                backupCount=5
+            )
+        ]
+    )
 
 def validate_directory(path: str, should_exist: bool = True) -> Path:
     """Validate directory path and create if necessary"""
@@ -27,6 +50,7 @@ def validate_numeric_range(value: int, min_val: int, max_val: int, name: str) ->
         raise ValueError(f"{name} must be between {min_val} and {max_val}, got {value}")
 
 def parse_args():
+    """Parse command line arguments"""
     parser = argparse.ArgumentParser(description='Structure from Motion Pipeline')
     subparsers = parser.add_subparsers(dest='operation', help='Operation to perform')
     
@@ -48,7 +72,7 @@ def parse_args():
                                 help='Minimum number of matches (20-1000)')
     preprocess_parser.add_argument('--visualize', action='store_true',
                                 help='Show preprocessing visualizations')
-    preprocess_parser.add_argument('--mask', type=str,
+    preprocess_parser.add_argument('--mask', type=str, default=None,
                                 help='Path to mask image')
     
     # Reconstruction parser
@@ -91,6 +115,8 @@ def parse_args():
     return args
 
 class SfMPipeline:
+    """Structure from Motion Pipeline implementation"""
+    
     def __init__(self, args):
         self.args = args
         
@@ -255,23 +281,8 @@ def main():
         # Parse arguments
         args = parse_args()
         
-        # Configure logging with rotation
-        log_file = Path('logs') / f'sfm_pipeline_{time.strftime("%Y%m%d_%H%M%S")}.log'
-        log_file.parent.mkdir(exist_ok=True)
-        
-        logging.basicConfig(
-            level=getattr(logging, args.log_level),
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.StreamHandler(),
-                logging.RotatingFileHandler(
-                    log_file,
-                    maxBytes=10*1024*1024,  # 10MB
-                    backupCount=5
-                )
-            ]
-        )
-        logger = logging.getLogger(__name__)
+        # Setup logging
+        setup_logging(args.log_level)
         
         # Log system information
         logger.info(f"Python version: {sys.version}")
