@@ -1,45 +1,50 @@
 import argparse
 import logging
 import time
+import sys
 from pathlib import Path
 import cv2
 import numpy as np
 from tqdm import tqdm
 
-from utils import (
-    ImageMatcher,
-    RobustSfM,
-    run_bundle_adjustment,
-    visualize_cameras_and_points,
-    visualize_point_cloud,
-    DenseReconstruction,
-    save_reconstruction,
-    save_dense_reconstruction,
-    export_colmap_format
-)
+def validate_directory(path: str, should_exist: bool = True) -> Path:
+    """Validate directory path and create if necessary"""
+    path = Path(path)
+    if should_exist and not path.exists():
+        raise ValueError(f"Directory does not exist: {path}")
+    if not should_exist:
+        path.mkdir(parents=True, exist_ok=True)
+    return path
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+def validate_numeric_range(value: int, min_val: int, max_val: int, name: str) -> None:
+    """Validate numeric arguments are within acceptable ranges"""
+    if not min_val <= value <= max_val:
+        raise ValueError(f"{name} must be between {min_val} and {max_val}, got {value}")
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Structure from Motion Pipeline')
     subparsers = parser.add_subparsers(dest='operation', help='Operation to perform')
+    
+    # Add global arguments
+    parser.add_argument('--log_level', type=str,
+                       choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+                       default='INFO',
+                       help='Logging level')
     
     # Preprocessing parser
     preprocess_parser = subparsers.add_parser('preprocess', help='Run preprocessing')
     preprocess_parser.add_argument('--data_dir', type=str, required=True,
                                 help='Path to data directory containing images')
     preprocess_parser.add_argument('--start_idx', type=int, default=0,
-                                help='Starting image index')
-    preprocess_parser.add_argument('--end_idx', type=int, default=40,
-                                help='Ending image index')
+                                help='Starting image index (0-999)')
+    preprocess_parser.add_argument('--end_idx', type=int, default=35,
+                                help='Ending image index (0-999)')
     preprocess_parser.add_argument('--min_matches', type=int, default=150,
-                                help='Minimum number of matches')
+                                help='Minimum number of matches (20-1000)')
     preprocess_parser.add_argument('--visualize', action='store_true',
                                 help='Show preprocessing visualizations')
+    preprocess_parser.add_argument('--mask', type=str,
+                                help='Path to mask image')
     
     # Reconstruction parser
     reconstruct_parser = subparsers.add_parser('reconstruct', help='Run reconstruction')
@@ -47,16 +52,12 @@ def parse_args():
                                 help='Path to data directory containing preprocessed data')
     reconstruct_parser.add_argument('--output_dir', type=str, required=True,
                                 help='Path to output directory')
-    reconstruct_parser.add_argument('--min_inliers', type=int, default=100,
-                                help='Minimum number of inliers for a valid match')
-    reconstruct_parser.add_argument('--min_inlier_ratio', type=float, default=0.5,
-                                help='Minimum inlier ratio for a valid match')
-    reconstruct_parser.add_argument('--good_inlier_ratio', type=float, default=0.8,
-                                help='Threshold for very good pairs')
-    reconstruct_parser.add_argument('--skip_dense', action='store_true',
-                                help='Skip dense reconstruction')
-    reconstruct_parser.add_argument('--visualize', action='store_true',
-                                help='Show reconstruction visualizations')
+    reconstruct_parser.add_argument('--num_images', type=int, default=36,
+                                help='Number of images to process (2-1000)')
+    reconstruct_parser.add_argument('--export_colmap', action='store_true',
+                                help='Export to COLMAP format')
+    reconstruct_parser.add_argument('--export_meshlab', action='store_true',
+                                help='Export to MeshLab format')
     
     # Full pipeline parser
     pipeline_parser = subparsers.add_parser('pipeline', help='Run full pipeline')
@@ -65,41 +66,94 @@ def parse_args():
     pipeline_parser.add_argument('--output_dir', type=str, required=True,
                               help='Path to output directory')
     pipeline_parser.add_argument('--start_idx', type=int, default=0,
-                              help='Starting image index')
-    pipeline_parser.add_argument('--end_idx', type=int, default=40,
-                              help='Ending image index')
-    pipeline_parser.add_argument('--min_inliers', type=int, default=100,
-                              help='Minimum number of inliers for a valid match')
-    pipeline_parser.add_argument('--min_inlier_ratio', type=float, default=0.5,
-                              help='Minimum inlier ratio for a valid match')
-    pipeline_parser.add_argument('--good_inlier_ratio', type=float, default=0.8,
-                              help='Threshold for very good pairs')
-    pipeline_parser.add_argument('--skip_dense', action='store_true',
-                              help='Skip dense reconstruction')
-    pipeline_parser.add_argument('--visualize', action='store_true',
-                              help='Show visualizations')
+                              help='Starting image index (0-999)')
+    pipeline_parser.add_argument('--end_idx', type=int, default=35,
+                              help='Ending image index (0-999)')
+    pipeline_parser.add_argument('--num_images', type=int, default=36,
+                              help='Number of images to process (2-1000)')
+    pipeline_parser.add_argument('--export_colmap', action='store_true',
+                              help='Export to COLMAP format')
+    pipeline_parser.add_argument('--export_meshlab', action='store_true',
+                              help='Export to MeshLab format')
+    pipeline_parser.add_argument('--mask', type=str,
+                              help='Path to mask image')
     
-    return parser.parse_args()
+    args = parser.parse_args()
+    
+    if not args.operation:
+        parser.error("Operation required: choose 'preprocess', 'reconstruct', or 'pipeline'")
+    
+    return args
 
 class SfMPipeline:
     def __init__(self, args):
         self.args = args
-        self.data_dir = Path(args.data_dir)
-        self.output_dir = Path(args.output_dir) if hasattr(args, 'output_dir') else None
         
-        # Create directory structure
+        # Setup directory structure with error handling
+        try:
+            self._setup_directories()
+            self._validate_inputs()
+        except PermissionError as e:
+            raise RuntimeError(f"Permission denied while creating directories: {e}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to setup pipeline: {e}")
+            
+    def _setup_directories(self):
+        """Setup directory structure with validation"""
+        # Validate data directory
+        self.data_dir = validate_directory(self.args.data_dir, should_exist=True)
+        
+        # Create and validate output directory if needed
+        if hasattr(self.args, 'output_dir'):
+            self.output_dir = validate_directory(self.args.output_dir, should_exist=False)
+            
+            # Ensure we have write permissions
+            test_file = self.output_dir / '.write_test'
+            try:
+                test_file.touch()
+                test_file.unlink()
+            except Exception as e:
+                raise PermissionError(f"Cannot write to output directory: {e}")
+        else:
+            self.output_dir = None
+            
+        # Create subdirectories
+        for subdir in ['images', 'matches', 'fundamental', 'correspondences']:
+            (self.data_dir / subdir).mkdir(exist_ok=True)
+            
         if self.output_dir:
-            self.output_dir.mkdir(parents=True, exist_ok=True)
-            (self.output_dir / 'sparse').mkdir(exist_ok=True)
-            if not args.skip_dense:
-                (self.output_dir / 'dense').mkdir(exist_ok=True)
-                
-        # Ensure required directories exist in data_dir
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        (self.data_dir / 'images').mkdir(exist_ok=True)
-        (self.data_dir / 'matches').mkdir(exist_ok=True)
-        (self.data_dir / 'fundamental').mkdir(exist_ok=True)
-        (self.data_dir / 'correspondences').mkdir(exist_ok=True)
+            for subdir in ['reconstruction', 'exports']:
+                (self.output_dir / subdir).mkdir(exist_ok=True)
+    
+    def _validate_inputs(self):
+        """Validate all input parameters"""
+        # Validate numeric ranges
+        ranges = {
+            'start_idx': (0, 999),
+            'end_idx': (0, 999),
+            'num_images': (2, 1000),
+            'min_matches': (20, 1000)
+        }
+        
+        for param, (min_val, max_val) in ranges.items():
+            if hasattr(self.args, param):
+                validate_numeric_range(
+                    getattr(self.args, param),
+                    min_val,
+                    max_val,
+                    param
+                )
+        
+        # Validate mask file
+        if hasattr(self.args, 'mask') and self.args.mask:
+            mask_path = Path(self.args.mask)
+            if not mask_path.exists():
+                raise ValueError(f"Mask file does not exist: {mask_path}")
+            try:
+                # Verify mask is readable
+                cv2.imread(str(mask_path))
+            except Exception as e:
+                raise ValueError(f"Invalid mask file: {e}")
     
     def run_preprocessing(self):
         """Run feature matching and geometric verification"""
@@ -109,104 +163,137 @@ class SfMPipeline:
         try:
             # Initialize matcher with parameters
             matcher = ImageMatcher(self.data_dir)
-            matcher.min_matches = self.args.min_matches if hasattr(self.args, 'min_matches') else 150
             
             # Process image pairs
-            matcher.process_image_range(self.args.start_idx, self.args.end_idx)
+            matcher.process_image_range(self.args.start_idx, self.args.end_idx, self.args.mask)
             
             # Save results
-            matcher.save_results(self.data_dir / 'pair_matches.csv')
+            matcher.save_results(self.data_dir / 'matching_results.csv')
             
             elapsed_time = time.time() - start_time
             logger.info(f"Preprocessing completed in {elapsed_time:.2f} seconds!")
+            return True
             
+        except cv2.error as e:
+            logger.error(f"OpenCV error during preprocessing: {str(e)}")
+            return False
         except Exception as e:
             logger.error(f"Preprocessing failed: {str(e)}")
-            raise
+            return False
     
     def run_reconstruction(self):
-        """Run SfM reconstruction using RobustSfM"""
-        logger.info("Starting reconstruction...")
+        """Run SfM reconstruction and export results"""
+        logger.info("Starting reconstruction pipeline...")
         start_time = time.time()
         
         try:
-            # Initialize RobustSfM with parameters
-            sfm = RobustSfM(self.data_dir)
-            
-            # Set parameters if provided
-            if hasattr(self.args, 'min_inliers'):
-                sfm.min_inliers = self.args.min_inliers
-            if hasattr(self.args, 'min_inlier_ratio'):
-                sfm.min_inlier_ratio = self.args.min_inlier_ratio
-            if hasattr(self.args, 'good_inlier_ratio'):
-                sfm.good_inlier_ratio = self.args.good_inlier_ratio
+            # Initialize SfM with data directory
+            sfm = StructureFromMotion(self.data_dir)
             
             # Run reconstruction
-            reconstruction = sfm.reconstruct(str(self.data_dir / 'pair_matches.csv'))
+            logger.info("Running Structure from Motion...")
+            sfm.run_reconstruction(self.args.num_images)
             
-            # Visualize if requested
-            if self.args.visualize:
-                logger.info("Visualizing reconstruction...")
-                visualize_cameras_and_points(reconstruction)
+            # Save reconstruction results
+            recon_dir = self.output_dir / 'reconstruction'
+            logger.info(f"Saving reconstruction to {recon_dir}")
+            sfm.save_reconstruction(recon_dir)
             
-            # Dense reconstruction if not skipped
-            if not self.args.skip_dense:
-                logger.info("Starting dense reconstruction...")
-                dense = DenseReconstruction(reconstruction, self.data_dir)
-                points, colors = dense.create_dense_point_cloud()
-                mesh = dense.create_mesh(points, dense.estimate_normals(points))
+            # Export results if requested
+            if self.args.export_colmap or self.args.export_meshlab:
+                logger.info("Initializing exporter...")
+                exporter = SfMExporter(recon_dir)
                 
-                if self.args.visualize:
-                    visualize_point_cloud(points, colors)
-            
-            # Save results
-            logger.info("Saving reconstruction results...")
-            save_reconstruction(reconstruction, self.output_dir / 'sparse')
-            
-            if not self.args.skip_dense:
-                save_dense_reconstruction(points, colors, mesh, self.output_dir / 'dense')
-            
-            # Export to COLMAP format
-            export_colmap_format(reconstruction, self.output_dir / 'colmap')
+                export_dir = self.output_dir / 'exports'
+                
+                if self.args.export_colmap:
+                    logger.info("Exporting to COLMAP format...")
+                    colmap_dir = export_dir / 'colmap'
+                    colmap_dir.mkdir(exist_ok=True)
+                    exporter.export_colmap(colmap_dir)
+                    
+                if self.args.export_meshlab:
+                    logger.info("Exporting to MeshLab format...")
+                    meshlab_path = export_dir / 'reconstruction.ply'
+                    exporter.export_meshlab(meshlab_path)
             
             elapsed_time = time.time() - start_time
-            logger.info(f"Reconstruction completed in {elapsed_time:.2f} seconds!")
+            logger.info(f"Pipeline completed in {elapsed_time:.2f} seconds!")
+            return True
             
+        except MemoryError:
+            logger.error("Insufficient memory for reconstruction")
+            return False
         except Exception as e:
-            logger.error(f"Reconstruction failed: {str(e)}")
-            raise
+            logger.error(f"Pipeline failed: {str(e)}")
+            return False
     
     def run_full_pipeline(self):
         """Run complete pipeline including preprocessing and reconstruction"""
         try:
             # Run preprocessing
-            self.run_preprocessing()
+            if not self.run_preprocessing():
+                return False
             
             # Run reconstruction
-            self.run_reconstruction()
+            if not self.run_reconstruction():
+                return False
+                
+            return True
             
         except Exception as e:
             logger.error(f"Pipeline failed: {str(e)}")
-            raise
+            return False
 
 def main():
-    args = parse_args()
-    
     try:
+        # Parse arguments
+        args = parse_args()
+        
+        # Configure logging with rotation
+        log_file = Path('logs') / f'sfm_pipeline_{time.strftime("%Y%m%d_%H%M%S")}.log'
+        log_file.parent.mkdir(exist_ok=True)
+        
+        logging.basicConfig(
+            level=getattr(logging, args.log_level),
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.StreamHandler(),
+                logging.RotatingFileHandler(
+                    log_file,
+                    maxBytes=10*1024*1024,  # 10MB
+                    backupCount=5
+                )
+            ]
+        )
+        logger = logging.getLogger(__name__)
+        
+        # Log system information
+        logger.info(f"Python version: {sys.version}")
+        logger.info(f"OpenCV version: {cv2.__version__}")
+        logger.info(f"NumPy version: {np.__version__}")
+        
+        # Initialize and run pipeline
         pipeline = SfMPipeline(args)
         
+        success = False
         if args.operation == 'preprocess':
-            pipeline.run_preprocessing()
+            success = pipeline.run_preprocessing()
         elif args.operation == 'reconstruct':
-            pipeline.run_reconstruction()
+            success = pipeline.run_reconstruction()
         elif args.operation == 'pipeline':
-            pipeline.run_full_pipeline()
-        else:
-            logger.error("Invalid operation specified")
+            success = pipeline.run_full_pipeline()
             
+        return 0 if success else 1
+            
+    except KeyboardInterrupt:
+        logger.warning("Operation interrupted by user")
+        return 130
     except Exception as e:
-        logger.error(f"Operation failed: {str(e)}")
-        raise
+        logger.error(f"Fatal error: {str(e)}", exc_info=True)
+        return 1
+    finally:
+        logging.shutdown()
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
