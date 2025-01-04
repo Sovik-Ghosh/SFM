@@ -42,7 +42,7 @@ The pipeline can be run in three modes:
 
 ```bash
 python main.py preprocess \
-    --data_dir /path/to/images \
+    --data_dir ./bunny_data \
     --start_idx 0 \
     --end_idx 35 \
     --min_matches 150
@@ -52,8 +52,8 @@ python main.py preprocess \
 
 ```bash
 python main.py reconstruct \
-    --data_dir /path/to/preprocessed \
-    --output_dir /path/to/output \
+    --data_dir ./bunny_data \
+    --output_dir ./bunny_data \
     --num_images 36 \
     --export_colmap
 ```
@@ -62,8 +62,8 @@ python main.py reconstruct \
 
 ```bash
 python main.py pipeline \
-    --data_dir /path/to/images \
-    --output_dir /path/to/output \
+    --data_dir ./bunny_data \
+    --output_dir ./bunny_data \
     --start_idx 0 \
     --end_idx 35 \
     --num_images 36
@@ -159,7 +159,7 @@ output_dir/
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) file.
+Apache License. See [LICENSE](LICENSE) file.
 
 ---
 
