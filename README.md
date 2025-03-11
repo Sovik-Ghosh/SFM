@@ -3,7 +3,7 @@
 A robust Structure from Motion (SfM) implementation for 3D reconstruction from image sequences.
 
 <p align="center">
-  <img src="./bunny_video.gif" alt="Demo" width="600"/>
+  <img src="./bunny.gif" alt="Demo" width="600"/>
 </p>
 
 ## Table of Contents
@@ -28,7 +28,7 @@ A robust Structure from Motion (SfM) implementation for 3D reconstruction from i
 
 ```bash
 # Python version
-Python 3.8 or higher
+Python 3.7
 
 # Required packages
 pip install -r requirements.txt
@@ -110,7 +110,7 @@ sfm/
 * Match filtering
 
 <p align="center">
-  <img src="./bunny_data/visualizations/pair_7_24_matches.png" alt="Feature Matching" width="600"/>
+  <img src="./bunny_data/visualizations/pair_25_26_matches.png" alt="Feature Matching" width="600"/>
   <br>
   <em>Feature Matching between Images 7 and 24</em>
 </p>
@@ -123,7 +123,7 @@ sfm/
   * Feature distribution
 
 <p align="center">
-  <img src="./utils/image_graph.png" alt="Feature Matching" width="600"/>
+  <img src="./image_graph.png" alt="Feature Matching" width="600"/>
   <br>
   <em>Graph Network for next best image selection</em>
 </p>

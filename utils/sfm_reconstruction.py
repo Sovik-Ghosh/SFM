@@ -43,8 +43,8 @@ class StructureFromMotion:
         
         # Camera intrinsic matrix for all images
         self.K = np.array([
-            [2393.95, 0, 932.38],
-            [0, 2398.12, 628.26],
+            [1228, 0, 512],
+            [0, 1228, 384],
             [0, 0, 1]
         ], dtype=np.float64)
         
@@ -270,14 +270,16 @@ class StructureFromMotion:
         Returns:
             point3D: Triangulated 3D point or None if invalid
         """
+        
         if len(image_points) < 2:
             return None
-            
+        
         # Set up projection matrices
         Ps = []
         points = []
         for img_id, point in image_points.items():
             R, t = self.poses[img_id]
+            t = np.asarray(t).reshape(3, 1)
             P = self.K @ np.hstack([R, t])
             Ps.append(P)
             points.append(point)
@@ -285,10 +287,12 @@ class StructureFromMotion:
         Ps = np.array(Ps)
         points = np.array(points)
         
+        
         # Triangulate
         point4D = cv2.triangulatePoints(Ps[0], Ps[1], 
                                       points[0].reshape(-1, 2).T,
                                       points[1].reshape(-1, 2).T)
+        
         point3D = (point4D[:3] / point4D[3]).ravel()
         
         # Verify reprojection error
@@ -654,7 +658,7 @@ class StructureFromMotion:
             logging.info(f"Current reconstruction has {len(self.constructed)} images")
             
             # Get next best images
-            next_best_images = self.selector.find_next_best_images(self.constructed, num_images)
+            next_best_images = self.selector.find_next_best_images(self.constructed, self.points3D, self.point_tracks, num_images)
             
             if not next_best_images:
                 logging.warning("No next best images available")

@@ -76,18 +76,20 @@ class SfMGraphSelector:
         
         return weighted_centrality
     
-    def find_next_best_images(self, current_reconstruction, top_k=5):
+    def find_next_best_images(self, current_reconstruction, points3D=None, point_tracks=None, top_k=5):
         """
-        Find the next best images to add to the reconstruction
+        Find the next best images to add to the reconstruction with enhanced selection criteria
         
         Args:
             current_reconstruction (list): List of images already in the reconstruction
+            points3D (list, optional): Current 3D points in the reconstruction
+            point_tracks (list, optional): Point observation tracks
             top_k (int): Number of best images to return
         
         Returns:
             list: Top K images to add to reconstruction
         """
-        # Compute node importance
+        # Compute base node importance
         node_importance = self.compute_node_importance()
         
         # Filter out already reconstructed images
@@ -96,27 +98,66 @@ class SfMGraphSelector:
             if img not in current_reconstruction
         ]
         
-        # Sort candidates by importance and connection to current reconstruction
+        # No candidates available
+        if not candidate_images:
+            return []
+            
+        # Sort candidates by importance and connection quality to current reconstruction
         candidate_scores = {}
         for img in candidate_images:
-            # Check connections to current reconstruction
-            connected_to_current = sum(
-                1 for recon_img in current_reconstruction 
-                if self.graph.has_edge(img, recon_img)
-            )
+            # Count connections to current reconstruction
+            connections = []
+            connection_quality = 0
             
-            # Compute score
+            for recon_img in current_reconstruction:
+                if self.graph.has_edge(img, recon_img):
+                    connections.append(recon_img)
+                    # Add quality metrics
+                    edge_data = self.graph[img][recon_img]
+                    connection_quality += (
+                        edge_data['inlier_ratio'] * 0.5 + 
+                        min(1.0, edge_data['num_inliers'] / 100) * 0.5
+                    )
+            
+            # Skip images with no connections to current reconstruction
+            if not connections:
+                continue
+                
+            # Average connection quality
+            avg_connection_quality = connection_quality / len(connections) if connections else 0
+            
+            # Calculate connection breadth factor (reward connecting to multiple existing images)
+            connection_breadth = min(1.0, len(connections) / len(current_reconstruction))
+            
+            # If point_tracks are provided, calculate visibility score
+            visibility_score = 0
+            if point_tracks and points3D:
+                # Count potential visible 3D points
+                visible_points = 0
+                for track_idx, track in enumerate(point_tracks):
+                    # Check if this track connects to any current reconstruction image
+                    if any(int(img_id.split('.')[0]) in track for img_id in current_reconstruction):
+                        visible_points += 1
+                
+                # Normalize by total points
+                visibility_score = visible_points / (len(points3D) + 1) 
+            
+            # Compute final score with adjusted weights
             candidate_scores[img] = (
-                node_importance.get(img, 0) * 0.7 +
-                connected_to_current * 0.3
+                node_importance.get(img, 0) * 0.3 +           # General node importance
+                avg_connection_quality * 0.4 +                # Quality of connections
+                connection_breadth * 0.2 +                    # Breadth of connections
+                visibility_score * 0.1                        # Potential point visibility
             )
         
-        # Return top K candidates
-        return sorted(
-            candidate_scores, 
+        # Return top K candidates with non-zero scores
+        sorted_candidates = sorted(
+            [img for img, score in candidate_scores.items() if score > 0], 
             key=candidate_scores.get, 
             reverse=True
-        )[:top_k]
+        )
+        
+        return sorted_candidates[:top_k]
     
     def visualize_graph(self, output_path='image_graph.png', max_size=1000):
         """
