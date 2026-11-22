@@ -33,6 +33,15 @@
       }
     },
     {
+      "name": "cpu",
+      "displayName": "Release, CPU only (no CUDA toolkit needed)",
+      "binaryDir": "${sourceDir}/build/${presetName}$env{SFM_BUILD_SUFFIX}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SFM_WITH_CUDA": "OFF"
+      }
+    },
+    {
       "name": "asan",
       "inherits": "base",
       "displayName": "Debug + AddressSanitizer/UBSan on host code",
@@ -78,6 +87,10 @@
       "configurePreset": "release"
     },
     {
+      "name": "cpu",
+      "configurePreset": "cpu"
+    },
+    {
       "name": "asan",
       "configurePreset": "asan"
     },
@@ -114,6 +127,17 @@
       "name": "release",
       "inherits": "base",
       "configurePreset": "release"
+    },
+    {
+      "name": "cpu",
+      "inherits": "base",
+      "configurePreset": "cpu",
+      "displayName": "CPU-only build: every test it has (no display tests)",
+      "filter": {
+        "exclude": {
+          "label": "display"
+        }
+      }
     },
     {
       "name": "asan",

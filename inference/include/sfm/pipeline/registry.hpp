@@ -58,6 +58,14 @@ Backend detect_backend();
 // bf_cpu / lm_schur_cpu. Explicit method names are kept.
 config::Config resolve_auto_methods(const config::Config& cfg, bool gpu);
 
+// cfg on one backend: "auto" resolved, then every *_cuda method replaced by its *_cpu twin
+// (gpu false) or every *_cpu method by its *_cuda twin (gpu true). sfm_run --backend; the
+// pipeline's fallback when a config asks for CUDA methods without a GPU or without CUDA support.
+config::Config use_backend(const config::Config& cfg, bool gpu);
+
+// True if this build has the CUDA methods (SFM_WITH_CUDA).
+bool built_with_cuda();
+
 // The built-in methods: features "orb_cpu", "orb_cuda" (GPU, bit-identical output), matching
 // "bf_cpu", "bf_cuda" (GPU top-2 identical, GPU RANSAC with every hypothesis scored), ba
 // "lm_schur_cpu", "lm_schur_cuda" (GPU linear algebra, same LM loop). Not thread-safe: orb_cuda

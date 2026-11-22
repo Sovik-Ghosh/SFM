@@ -15,20 +15,27 @@ using namespace sfm::pipeline;  // NOLINT(google-build-using-namespace)
 TEST(Registry, DefaultMethodsAndUnknownNames) {
   const Registry& r = default_registry();
   EXPECT_TRUE(static_cast<bool>(r.features("orb_cpu")));
-  EXPECT_TRUE(static_cast<bool>(r.features("orb_cuda")));
   EXPECT_TRUE(static_cast<bool>(r.features("sift_cpu")));
-  EXPECT_TRUE(static_cast<bool>(r.features("sift_cuda")));
   EXPECT_TRUE(static_cast<bool>(r.matching("bf_cpu")));
-  EXPECT_TRUE(static_cast<bool>(r.matching("bf_cuda")));
   EXPECT_TRUE(static_cast<bool>(r.ba("lm_schur_cpu")));
-  EXPECT_TRUE(static_cast<bool>(r.ba("lm_schur_cuda")));
+  if (built_with_cuda()) {
+    EXPECT_TRUE(static_cast<bool>(r.features("orb_cuda")));
+    EXPECT_TRUE(static_cast<bool>(r.features("sift_cuda")));
+    EXPECT_TRUE(static_cast<bool>(r.matching("bf_cuda")));
+    EXPECT_TRUE(static_cast<bool>(r.ba("lm_schur_cuda")));
+  } else {  // CPU-only build: no CUDA methods
+    EXPECT_THROW(r.features("sift_cuda"), sfm::ConfigError);
+    EXPECT_THROW(r.ba("lm_schur_cuda"), sfm::ConfigError);
+  }
   try {
     r.features("orb_gpu");
     FAIL() << "no ConfigError";
   } catch (const sfm::ConfigError& e) {
     EXPECT_EQ(std::string(e.what()),
-              "features.method: unknown method 'orb_gpu' (known: orb_cpu, orb_cuda, sift_cpu, "
-              "sift_cuda)");
+              built_with_cuda()
+                  ? "features.method: unknown method 'orb_gpu' (known: orb_cpu, orb_cuda, "
+                    "sift_cpu, sift_cuda)"
+                  : "features.method: unknown method 'orb_gpu' (known: orb_cpu, sift_cpu)");
   }
   EXPECT_THROW(r.matching("x"), sfm::ConfigError);
   EXPECT_THROW(r.ba("x"), sfm::ConfigError);
@@ -38,6 +45,21 @@ TEST(Registry, DefaultMethodsAndUnknownNames) {
                     [](const sfm::data::Image8&, const sfm::data::Image8*,
                        const sfm::config::FeaturesConfig&) { return sfm::features::Features{}; });
   EXPECT_EQ(mine.features("a")(sfm::data::Image8{}, nullptr, {}).size(), 0u);
+}
+
+TEST(Registry, UseBackendSwapsEveryMethod) {
+  sfm::config::Config c;
+  c.features.method = "sift_cuda";
+  c.matching.method = "bf_cuda";
+  c.ba.method = "auto";
+  const auto cpu = use_backend(c, false);
+  EXPECT_EQ(cpu.features.method, "sift_cpu");
+  EXPECT_EQ(cpu.matching.method, "bf_cpu");
+  EXPECT_EQ(cpu.ba.method, "lm_schur_cpu");
+  const auto gpu = use_backend(cpu, true);
+  EXPECT_EQ(gpu.features.method, "sift_cuda");
+  EXPECT_EQ(gpu.matching.method, "bf_cuda");
+  EXPECT_EQ(gpu.ba.method, "lm_schur_cuda");
 }
 
 TEST(Stages, ParseAndPrint) {
@@ -58,7 +80,10 @@ TEST(Registry, RepositoryConfigsNameKnownMethods) {
     text << in.rdbuf();
     const auto parsed = sfm::config::parse_config(text.str());
     for (const bool gpu : {false, true}) {
-      const auto c = resolve_auto_methods(parsed, gpu);
+      if (gpu && !built_with_cuda()) continue;
+      // CPU-only builds run CUDA configs on the CPU twins (the pipeline's fallback).
+      const auto c =
+          built_with_cuda() ? resolve_auto_methods(parsed, gpu) : use_backend(parsed, false);
       EXPECT_NO_THROW(default_registry().features(c.features.method));
       EXPECT_NO_THROW(default_registry().matching(c.matching.method));
       EXPECT_NO_THROW(default_registry().ba(c.ba.method));

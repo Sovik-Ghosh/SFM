@@ -10,7 +10,9 @@ sfm_add_test(test_viewer_load
   SOURCES test_run_loader.cpp
   LIBS sfm::viewer_core
   LABELS slow cuda)
-target_compile_definitions(test_viewer_load PRIVATE SFM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+if(TARGET test_viewer_load)  # skipped in CPU-only builds
+  target_compile_definitions(test_viewer_load PRIVATE SFM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+endif()
 
 # Off-screen render test: needs an X display (label "display": not run in CI, which has none;
 # skips itself without a display).

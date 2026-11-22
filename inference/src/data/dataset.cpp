@@ -3,7 +3,9 @@
 #include <cstring>
 #include <string>
 
+#if SFM_WITH_CUDA
 #include "sfm/core/cuda_check.h"
+#endif
 #include "sfm/core/error.hpp"
 #include "sfm/data/image_io.hpp"
 #include "sfm/data/krt.hpp"
@@ -73,6 +75,7 @@ Dataset load_dataset(const config::DatasetConfig& cfg, core::Logger& log) {
   return ds;
 }
 
+#if SFM_WITH_CUDA
 DeviceImages upload(const Dataset& ds, core::Arena& arena, const core::Stream& stream) {
   DeviceImages d;
   d.gray = arena.allocate<std::uint8_t>(ds.gray.size());
@@ -85,5 +88,6 @@ DeviceImages upload(const Dataset& ds, core::Arena& arena, const core::Stream& s
   }
   return d;
 }
+#endif
 
 }  // namespace sfm::data

@@ -1,5 +1,6 @@
-# Build everything (CUDA code included) and run the tests that need no GPU, on GitHub's hosted
-# runners. The GPU tests run wherever a CUDA device is visible: `ctest --preset release`.
+# Two jobs on GitHub's hosted runners (no GPU): the full build (CUDA code included) with the tests
+# that need no GPU, and a CPU-only build (no CUDA toolkit) with all of its tests. The GPU tests run
+# wherever a CUDA device is visible: `ctest --preset release`.
 name: ci
 
 on:
@@ -34,3 +35,24 @@ jobs:
         run: cmake --build --preset ci
       - name: Tests without a GPU
         run: ctest --preset ci-cpu --output-on-failure
+
+  # CPU-only build on a plain runner: no CUDA toolkit, no NVIDIA driver. Builds with
+  # SFM_WITH_CUDA=OFF and runs every test that build has, the bunny reconstructions included.
+  cpu-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Install build tools (no CUDA)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++ libglfw3-dev libgl-dev
+          if command -v nvcc; then echo "nvcc found: this job must run without CUDA"; exit 1; fi
+      - name: Configure (preset cpu)
+        run: cmake --preset cpu -G Ninja
+      - name: Build
+        run: cmake --build --preset cpu
+      - name: All tests of the CPU build
+        run: ctest --preset cpu

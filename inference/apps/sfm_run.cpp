@@ -1,8 +1,11 @@
 // Runs the SfM pipeline described by a config.
-//   sfm_run <config.json> [--from <stage>] [--to <stage>]
-// Stages: features, matching, tracks, reconstruction, export. --from loads the earlier stages'
-// outputs from <output_dir>/<name>/stages/ (written by a previous run). Relative paths in the
-// config are taken from the current directory. Exit code 0 on success, 1 on any error.
+//   sfm_run <config.json> [--from <stage>] [--to <stage>] [--backend cpu|gpu|auto]
+// Stages: features, matching, tracks, reconstruction, export. --backend runs every stage on the
+// CPU methods (cpu), the CUDA methods (gpu) or as the config says (auto, the default; a config
+// asking for CUDA methods falls back to the CPU ones when there is no GPU or no CUDA support).
+// --from loads the earlier stages' outputs from <output_dir>/<name>/stages/ (written by a previous
+// run). Relative paths in the config are taken from the current directory. Exit code 0 on success,
+// 1 on any error.
 #include <cstdio>
 #include <exception>
 #include <iostream>
@@ -12,11 +15,14 @@
 #include "sfm/core/error.hpp"
 #include "sfm/core/logger.hpp"
 #include "sfm/pipeline/pipeline.hpp"
+#include "sfm/pipeline/registry.hpp"
 
 namespace {
 
 int usage() {
-  std::fprintf(stderr, "usage: sfm_run <config.json> [--from <stage>] [--to <stage>]\n");
+  std::fprintf(stderr,
+               "usage: sfm_run <config.json> [--from <stage>] [--to <stage>] "
+               "[--backend cpu|gpu|auto]\n");
   return 1;
 }
 
@@ -26,15 +32,20 @@ int main(int argc, char** argv) {
   if (argc < 2) return usage();
   try {
     sfm::pipeline::RunOptions opt;
+    std::string backend = "auto";
     for (int k = 2; k < argc; ++k) {
       const std::string a = argv[k];
       if ((a == "--from" || a == "--to") && k + 1 < argc) {
         (a == "--from" ? opt.from : opt.to) = sfm::pipeline::parse_stage(argv[++k]);
+      } else if (a == "--backend" && k + 1 < argc) {
+        backend = argv[++k];
+        if (backend != "cpu" && backend != "gpu" && backend != "auto") return usage();
       } else {
         return usage();
       }
     }
-    const auto cfg = sfm::config::load_config(argv[1]);
+    auto cfg = sfm::config::load_config(argv[1]);
+    if (backend != "auto") cfg = sfm::pipeline::use_backend(cfg, backend == "gpu");
     sfm::core::Logger log(cfg.run.log_level, &std::cerr);
     const auto r = sfm::pipeline::run_pipeline(cfg, opt, log);
     std::printf("run directory: %s\n", r.run_dir.string().c_str());

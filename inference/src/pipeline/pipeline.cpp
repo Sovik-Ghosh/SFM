@@ -186,8 +186,18 @@ RunResult run_pipeline(const config::Config& cfg_in, const RunOptions& opt, core
   const auto t_total = Clock::now();
   const bool any_auto = cfg_in.features.method == "auto" || cfg_in.matching.method == "auto" ||
                         cfg_in.ba.method == "auto";
-  const Backend backend = any_auto ? detect_backend() : Backend{};
-  const config::Config cfg = any_auto ? resolve_auto_methods(cfg_in, backend.gpu) : cfg_in;
+  const auto is_cuda = [](const std::string& m) {
+    return m.size() > 5 && m.compare(m.size() - 5, 5, "_cuda") == 0;
+  };
+  const bool any_cuda = is_cuda(cfg_in.features.method) || is_cuda(cfg_in.matching.method) ||
+                        is_cuda(cfg_in.ba.method);
+  const Backend backend = any_auto || any_cuda ? detect_backend() : Backend{};
+  // A config that asks for CUDA methods runs on their CPU twins when this build has no CUDA or
+  // no GPU is visible (logged as run.backend_fallback), so every config runs everywhere.
+  const bool fallback = any_cuda && !backend.gpu;
+  const config::Config cfg = fallback   ? use_backend(cfg_in, false)
+                             : any_auto ? resolve_auto_methods(cfg_in, backend.gpu)
+                                        : cfg_in;
   const auto check_cancel = [&] {
     if (sink != nullptr && sink->cancelled()) throw Cancelled("run cancelled");
   };
@@ -210,6 +220,13 @@ RunResult run_pipeline(const config::Config& cfg_in, const RunOptions& opt, core
   write_text(res.run_dir / "config.json", config::to_json(cfg));
   log.info("run.start",
            {{"run", cfg.run.name}, {"from", to_string(opt.from)}, {"to", to_string(opt.to)}});
+  if (fallback) {
+    log.warn("run.backend_fallback",
+             {{"reason", built_with_cuda() ? "no CUDA device visible" : "built without CUDA"},
+              {"features", cfg.features.method},
+              {"matching", cfg.matching.method},
+              {"ba", cfg.ba.method}});
+  }
   if (any_auto) {
     log.info("run.backend", {{"gpu", backend.gpu},
                              {"device", backend.device.empty() ? "none" : backend.device},

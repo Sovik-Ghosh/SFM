@@ -3,7 +3,9 @@
 #include <stdexcept>
 #include <type_traits>
 
+#if SFM_WITH_CUDA
 #include "sfm/core/cuda_check.h"
+#endif
 #include "sfm/core/error.hpp"
 
 TEST(Error, HierarchyLetsAppsCatchOneType) {
@@ -11,7 +13,9 @@ TEST(Error, HierarchyLetsAppsCatchOneType) {
   static_assert(std::is_base_of_v<sfm::Error, sfm::ConfigError>);
   static_assert(std::is_base_of_v<sfm::Error, sfm::IoError>);
   static_assert(std::is_base_of_v<sfm::Error, sfm::ArenaError>);
+#if SFM_WITH_CUDA
   static_assert(std::is_base_of_v<sfm::Error, sfm::core::CudaError>);
+#endif
   SUCCEED();
 }
 

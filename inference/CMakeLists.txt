@@ -8,18 +8,26 @@ configure_file(include/sfm/core/version.hpp.in
                ${CMAKE_CURRENT_BINARY_DIR}/generated/sfm/core/version.hpp @ONLY)
 
 add_library(sfm_core
-  src/core/arena.cpp
-  src/core/cuda_timer.cpp
-  src/core/device_info.cu
   src/core/logger.cpp
   src/core/npy.cpp
-  src/core/stream.cpp
   src/core/version.cpp)
 add_library(sfm::core ALIAS sfm_core)
 target_include_directories(sfm_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_BINARY_DIR}/generated)
-target_link_libraries(sfm_core PUBLIC CUDA::cudart Threads::Threads)
+target_link_libraries(sfm_core PUBLIC Threads::Threads)
+if(SFM_WITH_CUDA)
+  target_sources(sfm_core PRIVATE
+    src/core/arena.cpp
+    src/core/cuda_timer.cpp
+    src/core/device_info.cu
+    src/core/stream.cpp)
+  target_link_libraries(sfm_core PUBLIC CUDA::cudart)
+  target_compile_definitions(sfm_core PUBLIC SFM_WITH_CUDA=1)
+else()
+  target_sources(sfm_core PRIVATE src/core/device_info_cpu.cpp)  # no devices
+  target_compile_definitions(sfm_core PUBLIC SFM_WITH_CUDA=0)
+endif()
 sfm_set_warnings(sfm_core)
 
 add_library(sfm_config
@@ -60,17 +68,19 @@ add_library(sfm::features ALIAS sfm_features)
 target_link_libraries(sfm_features PUBLIC sfm::data)
 sfm_set_warnings(sfm_features)
 
-# Feature stage on the GPU (P3): bit-identical to sfm_features' CPU ORB.
-add_library(sfm_features_cuda
-  src/features_cuda/orb_cuda.cu
-  src/features_cuda/orb_kernels.cu
-  src/features_cuda/sift_cuda.cu
-  src/features_cuda/sift_kernels.cu)
-add_library(sfm::features_cuda ALIAS sfm_features_cuda)
-target_link_libraries(sfm_features_cuda PUBLIC sfm::features sfm::core)
-sfm_set_warnings(sfm_features_cuda)
-# SIFT parity with the CPU needs every float operation as written: no fused multiply-adds.
-target_compile_options(sfm_features_cuda PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-fmad=false>)
+if(SFM_WITH_CUDA)
+  # Feature stage on the GPU (P3): bit-identical to sfm_features' CPU ORB.
+  add_library(sfm_features_cuda
+    src/features_cuda/orb_cuda.cu
+    src/features_cuda/orb_kernels.cu
+    src/features_cuda/sift_cuda.cu
+    src/features_cuda/sift_kernels.cu)
+  add_library(sfm::features_cuda ALIAS sfm_features_cuda)
+  target_link_libraries(sfm_features_cuda PUBLIC sfm::features sfm::core)
+  sfm_set_warnings(sfm_features_cuda)
+  # SIFT parity with the CPU needs every float operation as written: no fused multiply-adds.
+  target_compile_options(sfm_features_cuda PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-fmad=false>)
+endif()
 
 # Matching stage (CPU): brute-force Hamming, F-RANSAC verification, tracks. GPU matcher: P4.
 add_library(sfm_matching
@@ -88,16 +98,18 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 endif()
 sfm_set_warnings(sfm_matching)
 
-# Matching on the GPU (P4): batched top-2 (equal to the CPU's) and batched F-RANSAC.
-add_library(sfm_matching_cuda
-  src/matching_cuda/knn_api.cpp
-  src/matching_cuda/knn_cuda.cu
-  src/matching_cuda/ransac_api.cpp
-  src/matching_cuda/ransac_cuda.cu
-  src/matching_cuda/verify_cuda.cpp)
-add_library(sfm::matching_cuda ALIAS sfm_matching_cuda)
-target_link_libraries(sfm_matching_cuda PUBLIC sfm::matching sfm::core)
-sfm_set_warnings(sfm_matching_cuda)
+if(SFM_WITH_CUDA)
+  # Matching on the GPU (P4): batched top-2 (equal to the CPU's) and batched F-RANSAC.
+  add_library(sfm_matching_cuda
+    src/matching_cuda/knn_api.cpp
+    src/matching_cuda/knn_cuda.cu
+    src/matching_cuda/ransac_api.cpp
+    src/matching_cuda/ransac_cuda.cu
+    src/matching_cuda/verify_cuda.cpp)
+  add_library(sfm::matching_cuda ALIAS sfm_matching_cuda)
+  target_link_libraries(sfm_matching_cuda PUBLIC sfm::matching sfm::core)
+  sfm_set_warnings(sfm_matching_cuda)
+endif()
 
 # Reconstruction stage (CPU): two-view geometry, triangulation, PnP, incremental loop.
 add_library(sfm_recon
@@ -121,13 +133,15 @@ add_library(sfm::ba ALIAS sfm_ba)
 target_link_libraries(sfm_ba PUBLIC sfm::recon sfm::eigen)
 sfm_set_warnings(sfm_ba)
 
-# Bundle adjustment on the GPU: linearisation, Schur complement and Cholesky on the device.
-add_library(sfm_ba_cuda
-  src/ba_cuda/ba_cuda.cpp
-  src/ba_cuda/ba_device.cu)
-add_library(sfm::ba_cuda ALIAS sfm_ba_cuda)
-target_link_libraries(sfm_ba_cuda PUBLIC sfm::ba sfm::core PRIVATE CUDA::cusolver)
-sfm_set_warnings(sfm_ba_cuda)
+if(SFM_WITH_CUDA)
+  # Bundle adjustment on the GPU: linearisation, Schur complement and Cholesky on the device.
+  add_library(sfm_ba_cuda
+    src/ba_cuda/ba_cuda.cpp
+    src/ba_cuda/ba_device.cu)
+  add_library(sfm::ba_cuda ALIAS sfm_ba_cuda)
+  target_link_libraries(sfm_ba_cuda PUBLIC sfm::ba sfm::core PRIVATE CUDA::cusolver)
+  sfm_set_warnings(sfm_ba_cuda)
+endif()
 
 # Export: PLY + COLMAP text.
 add_library(sfm_export
@@ -143,8 +157,11 @@ add_library(sfm_pipeline
   src/pipeline/registry.cpp
   src/pipeline/stage_io.cpp)
 add_library(sfm::pipeline ALIAS sfm_pipeline)
-target_link_libraries(sfm_pipeline PUBLIC sfm::ba sfm::ba_cuda sfm::export sfm::recon sfm::features sfm::features_cuda sfm::matching_cuda sfm::config
+target_link_libraries(sfm_pipeline PUBLIC sfm::ba sfm::export sfm::recon sfm::features sfm::config
                       sfm::data sfm::eval PRIVATE sfm::json)
+if(SFM_WITH_CUDA)
+  target_link_libraries(sfm_pipeline PUBLIC sfm::ba_cuda sfm::features_cuda sfm::matching_cuda)
+endif()
 sfm_set_warnings(sfm_pipeline)
 
 # Viewer core: scene geometry, colours, orbit camera, picking, ground truth, run loading. No

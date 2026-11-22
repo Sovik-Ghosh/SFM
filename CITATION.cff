@@ -11,7 +11,7 @@ authors:
     given-names: Sovik
     # TODO: orcid: "https://orcid.org/XXXX-XXXX-XXXX-XXXX" (if you have one)
 license: Apache-2.0
-version: 1.0.2
+version: 1.1.0
 date-released: 2026-11-22
 # TODO: repository-code: URL of the public repository once it carries this code.
 keywords:

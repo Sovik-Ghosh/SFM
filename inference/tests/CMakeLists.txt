@@ -7,6 +7,10 @@ include(GoogleTest)
 # state — free device memory, timing — which concurrent tests (ctest --parallel) would disturb.
 function(sfm_add_test name)
   cmake_parse_arguments(T "SERIAL" "" "SOURCES;LIBS;LABELS;ENV" ${ARGN})
+  # CPU-only builds (SFM_WITH_CUDA=OFF) leave out the GPU tests: their sources use CUDA.
+  if(NOT SFM_WITH_CUDA AND "cuda" IN_LIST T_LABELS)
+    return()
+  endif()
   add_executable(${name} ${T_SOURCES})
   target_link_libraries(${name} PRIVATE ${T_LIBS} GTest::gtest_main)
   target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_FUNCTION_LIST_DIR})  # test_env.hpp

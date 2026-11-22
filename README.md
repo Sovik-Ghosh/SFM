@@ -20,7 +20,7 @@
 ## What it does
 
 SFM finds where each photo was taken and builds a sparse 3D model of the scene, the way
-[COLMAP](https://colmap.github.io/) does, with every stage on the GPU:
+[COLMAP](https://colmap.github.io/) does, with every stage on the GPU (or, without one, on the CPU):
 
 - **Features:** SIFT or ORB, on the CPU or in CUDA (the CUDA versions give the same bits as the CPU ones).
 - **Matching:** exact top-2 on the GPU (SIFT on the tensor cores), ratio test, 5-point E-RANSAC or F-RANSAC.
@@ -37,14 +37,15 @@ from a four-camera rig it registers every image at 0.09°–0.36° in 1–5 minu
 
 | | Version | Notes |
 |---|---|---|
-| NVIDIA GPU + driver | CUDA 13 capable | tested on an RTX 5060 Ti (`sm_120`, the default) |
-| CUDA Toolkit | 13.0 | |
 | CMake | ≥ 3.24 | |
 | C++ compiler | C++17 | tested with GCC 13 |
+| CUDA Toolkit + NVIDIA GPU | 13.0 | **optional**: without them, build the CPU-only version (below) |
 | GLFW 3 + OpenGL headers | | only for the viewer: `sudo apt install libglfw3-dev libgl-dev` |
 
-Other GPUs: add `-DCMAKE_CUDA_ARCHITECTURES=<arch>` (for example `86` for an RTX 30xx, `89` for an
-RTX 40xx). Only `sm_120` is tested; `sm_87` (Jetson Orin) is compiled in CI.
+Every stage has a CPU and a CUDA version, and both give the same results; the GPU is 4–70× faster
+([benchmark](#cpu-vs-gpu)). GPU builds are tested on an RTX 5060 Ti (`sm_120`, the default); for
+other GPUs add `-DCMAKE_CUDA_ARCHITECTURES=<arch>` (for example `86` for an RTX 30xx, `89` for an
+RTX 40xx).
 
 ## Build
 
@@ -57,6 +58,16 @@ ctest --preset release                 # optional: the tests (GPU tests need a v
 ```
 
 The programs are in `build/release/inference/apps/`.
+
+**No NVIDIA GPU or no CUDA toolkit?** Build the CPU-only version; everything else below works the
+same, with `build/cpu/` instead of `build/release/`:
+
+```bash
+cmake --preset cpu && cmake --build --preset cpu -j && ctest --preset cpu
+```
+
+A config that asks for CUDA methods (`sift_cuda`, …) runs on their CPU versions when there is no GPU
+or no CUDA support (the run log says so); `sfm_run <config> --backend cpu|gpu` chooses explicitly.
 
 ## Run on the bunny
 
@@ -90,6 +101,26 @@ The other bunny configs: `bunny_sift.json` and `bunny_sift_tuned.json` (fewer / 
 | `bunny_sift.json` | 36 / 36 | 3736 | 0.26° / 0.58° | 0.8 s |
 | `bunny_gpu.json` (ORB) | 35 / 36 | 6805 | 0.55° / 4.5° | 0.8 s |
 | COLMAP 4.2 (same masks and intrinsics) | 36 / 36 | | 0.28° / 0.64° | |
+
+## CPU vs GPU
+
+`bench_stages <config>` runs a config on the CPU methods and on the CUDA methods and prints the time
+per stage. Ryzen 7 9700X (16 threads) against an RTX 5060 Ti; both give the same result on each:
+
+| Config | Images | CPU | GPU | Speed-up | Result |
+|---|---|---|---|---|---|
+| `bunny.json` (ORB) | 36 | 2.3 s | 0.62 s | 3.8× | 35 / 36, 0.55° |
+| `bunny_sift_tuned2.json` (SIFT) | 36 | 26 s | 0.79 s | 33× | 36 / 36, 0.17° |
+| Middlebury templeRing | 47 | 48 s | 3.4 s | 14× | 47 / 47, 0.13° |
+| ETH3D courtyard (1550×1032) | 38 | 292 s | 4.1 s | 71× | 38 / 38, 0.034° |
+| ETH3D delivery_area, one camera | 237 | 105 s | 6.5 s | 16× | 237 / 237, 0.27° |
+
+On the CPU most of the time is SIFT (about 0.6–1.5 s per image) and matching; ORB configs are the
+fast choice there. The ETH3D and Middlebury data are not included.
+
+```bash
+./build/release/inference/apps/bench_stages configs/bunny_sift_tuned2.json
+```
 
 ## Use your own images
 

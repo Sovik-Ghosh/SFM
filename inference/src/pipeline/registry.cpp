@@ -1,17 +1,21 @@
 #include "sfm/pipeline/registry.hpp"
 
 #include <memory>
+#include <string>
 
 #include "sfm/ba/adjust.hpp"
-#include "sfm/ba/ba_cuda.hpp"
 #include "sfm/core/device_info.hpp"
 #include "sfm/core/error.hpp"
 #include "sfm/features/orb.hpp"
-#include "sfm/features/orb_cuda.hpp"
 #include "sfm/features/sift.hpp"
+#include "sfm/matching/verify.hpp"
+
+#if SFM_WITH_CUDA
+#include "sfm/ba/ba_cuda.hpp"
+#include "sfm/features/orb_cuda.hpp"
 #include "sfm/features/sift_cuda.hpp"
 #include "sfm/matching/matching_cuda.hpp"
-#include "sfm/matching/verify.hpp"
+#endif
 
 namespace sfm::pipeline {
 
@@ -50,6 +54,7 @@ Registry make_default() {
     p.edge_border = c.edge_border;
     return features::detect_orb(gray, mask, p);
   });
+#if SFM_WITH_CUDA
   // One OrbCuda per (parameters, image size), kept across images (device buffers are reused).
   auto cached = std::make_shared<std::unique_ptr<features::OrbCuda>>();
   r.add_features("orb_cuda", [cached](const data::Image8& gray, const data::Image8* mask,
@@ -69,10 +74,12 @@ Registry make_default() {
     }
     return orb->detect(gray, mask);
   });
+#endif
   r.add_features("sift_cpu", [](const data::Image8& gray, const data::Image8* mask,
                                 const config::FeaturesConfig& c) {
     return features::detect_sift(gray, mask, sift_params(c));
   });
+#if SFM_WITH_CUDA
   // One SiftCuda per (parameters, image size), as for ORB.
   auto sift_cached = std::make_shared<std::unique_ptr<features::SiftCuda>>();
   r.add_features("sift_cuda", [sift_cached](const data::Image8& gray, const data::Image8* mask,
@@ -89,6 +96,7 @@ Registry make_default() {
     }
     return sift->detect(gray, mask);
   });
+#endif
   r.add_matching("bf_cpu", [](const std::vector<features::Features>& f,
                               const config::MatchingConfig& c,
                               const std::vector<Eigen::Matrix3d>& K, std::uint64_t seed) {
@@ -108,6 +116,7 @@ Registry make_default() {
                                                          static_cast<int>(c.pairs.keyframe_stride)),
                                   p);
   });
+#if SFM_WITH_CUDA
   r.add_matching("bf_cuda",
                  [](const std::vector<features::Features>& f, const config::MatchingConfig& c,
                     const std::vector<Eigen::Matrix3d>& K, std::uint64_t seed) {
@@ -128,6 +137,7 @@ Registry make_default() {
                                               static_cast<int>(c.pairs.keyframe_stride)),
                        p);
                  });
+#endif
   r.add_ba("lm_schur_cpu", [](recon::Reconstruction& rec, const recon::TrackIndex& index,
                               const config::BaConfig& c, const std::vector<int>& free_images) {
     ba::Options o;
@@ -135,6 +145,7 @@ Registry make_default() {
     o.max_iters = static_cast<int>(c.max_iters);
     return ba::bundle_adjust(rec, index, o, &ba::solve, free_images);
   });
+#if SFM_WITH_CUDA
   r.add_ba("lm_schur_cuda", [](recon::Reconstruction& rec, const recon::TrackIndex& index,
                                const config::BaConfig& c, const std::vector<int>& free_images) {
     ba::Options o;
@@ -142,6 +153,7 @@ Registry make_default() {
     o.max_iters = static_cast<int>(c.max_iters);
     return ba::bundle_adjust(rec, index, o, &ba::solve_cuda, free_images);
   });
+#endif
   return r;
 }
 
@@ -172,6 +184,29 @@ config::Config resolve_auto_methods(const config::Config& cfg, bool gpu) {
   if (c.ba.method == "auto") c.ba.method = gpu ? "lm_schur_cuda" : "lm_schur_cpu";
   return c;
 }
+
+namespace {
+
+std::string swap_suffix(const std::string& m, const std::string& from, const std::string& to) {
+  if (m.size() > from.size() && m.compare(m.size() - from.size(), from.size(), from) == 0) {
+    return m.substr(0, m.size() - from.size()) + to;
+  }
+  return m;
+}
+
+}  // namespace
+
+config::Config use_backend(const config::Config& cfg, bool gpu) {
+  config::Config c = resolve_auto_methods(cfg, gpu);
+  const std::string from = gpu ? "_cpu" : "_cuda";
+  const std::string to = gpu ? "_cuda" : "_cpu";
+  c.features.method = swap_suffix(c.features.method, from, to);
+  c.matching.method = swap_suffix(c.matching.method, from, to);
+  c.ba.method = swap_suffix(c.ba.method, from, to);
+  return c;
+}
+
+bool built_with_cuda() { return SFM_WITH_CUDA != 0; }
 
 const Registry& default_registry() {
   static const Registry kRegistry = make_default();
