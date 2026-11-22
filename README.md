@@ -203,6 +203,11 @@ Cremers, University of Bonn. The ETH3D ([eth3d.net](https://www.eth3d.net/datase
 4.0) and Middlebury ([vision.middlebury.edu/mview](https://vision.middlebury.edu/mview/data/))
 results above were measured on those datasets, which are not included.
 
+## Questions and feedback
+
+Questions, ideas, or results on your own data: [Discussions](https://github.com/Sovik-Ghosh/SFM/discussions).
+Bugs: [Issues](https://github.com/Sovik-Ghosh/SFM/issues), with the command you ran and its `run.log`.
+
 ## License and citation
 
 [Apache 2.0](LICENSE). Third-party code in [`third_party/`](third_party/) keeps its own licence.
