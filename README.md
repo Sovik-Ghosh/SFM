@@ -2,25 +2,27 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./.github/assets/banner-dark.svg">
-  <img src="./.github/assets/banner-light.svg" alt="SFM" width="820">
+  <img src="./.github/assets/banner-light.svg" alt="SFM: GPU Structure-from-Motion in C++ and CUDA" width="820">
 </picture>
 
-**Incremental Structure-from-Motion in C++17 and CUDA: images in, camera poses and a 3D point cloud out.**
+**Structure-from-Motion (SfM) and photogrammetry in C++17 and CUDA: 3D reconstruction from photos, with camera poses and a sparse point cloud, on an NVIDIA GPU or the CPU. An open-source, GPU-accelerated alternative to COLMAP for incremental SfM.**
 
-[![ci](https://github.com/Sovik-Ghosh/SFM/actions/workflows/ci.yml/badge.svg)](https://github.com/Sovik-Ghosh/SFM/actions/workflows/ci.yml)
+[![ci](https://github.com/Sovik-Ghosh/sfm-cuda/actions/workflows/ci.yml/badge.svg)](https://github.com/Sovik-Ghosh/sfm-cuda/actions/workflows/ci.yml)
 [![CUDA](https://img.shields.io/badge/CUDA-13.0-76B900?logo=nvidia&logoColor=white)](#requirements)
 [![C++](https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white)](#requirements)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 
-<img src="./.github/assets/viewer-orbit-bunny.gif" alt="The bunny reconstruction (36 views, 5,960 points) turning in sfm_viewer" width="49%"/>
-<img src="./.github/assets/viewer-orbit-temple.gif" alt="The Middlebury templeRing reconstruction (47 views) turning in sfm_viewer" width="49%"/>
+<img src="./.github/assets/structure-from-motion-bunny-3d-point-cloud.gif" alt="Structure-from-Motion 3D reconstruction of the bunny dataset: 36 cameras and a 5,960-point cloud turning in sfm_viewer" width="49%"/>
+<img src="./.github/assets/structure-from-motion-middlebury-temple-3d-reconstruction.gif" alt="Multi-view 3D reconstruction of the Middlebury templeRing (47 views) with GPU Structure-from-Motion" width="49%"/>
 
 </div>
 
 ## What it does
 
-SFM finds where each photo was taken and builds a sparse 3D model of the scene, the way
-[COLMAP](https://colmap.github.io/) does, with every stage on the GPU (or, without one, on the CPU):
+SFM is a Structure-from-Motion pipeline for 3D reconstruction from photos: it finds where each
+photo was taken (camera poses) and builds a sparse 3D point cloud of the scene, the way
+[COLMAP](https://colmap.github.io/) does, with every stage on the GPU (or, without one, on the CPU).
+Use it for photogrammetry, multi-view geometry experiments, or as a C++/CUDA library:
 
 - **Features:** SIFT or ORB, on the CPU or in CUDA (the CUDA versions give the same bits as the CPU ones).
 - **Matching:** exact top-2 on the GPU (SIFT on the tensor cores), ratio test, 5-point E-RANSAC or F-RANSAC.
@@ -50,8 +52,8 @@ RTX 40xx).
 ## Build
 
 ```bash
-git clone https://github.com/Sovik-Ghosh/SFM.git
-cd SFM
+git clone https://github.com/Sovik-Ghosh/sfm-cuda.git
+cd sfm-cuda
 cmake --preset release                 # add -DCMAKE_CUDA_ARCHITECTURES=<arch> for other GPUs
 cmake --build --preset release -j
 ctest --preset release                 # optional: the tests (GPU tests need a visible GPU)
@@ -150,8 +152,8 @@ Masks (optional) are `masks/0000.pgm`, …: black = object, everything else igno
 ## Viewer
 
 <div align="center">
-<img src="./.github/assets/viewer-live.png" alt="sfm_viewer during a live run" width="49%"/>
-<img src="./.github/assets/viewer-compare.png" alt="sfm_viewer comparing two runs" width="49%"/>
+<img src="./.github/assets/sfm-viewer-live-3d-reconstruction.png" alt="sfm_viewer showing a Structure-from-Motion reconstruction live, camera by camera" width="49%"/>
+<img src="./.github/assets/sfm-viewer-compare-two-reconstructions.png" alt="sfm_viewer comparing two 3D reconstructions side by side with per-camera pose errors" width="49%"/>
 </div>
 
 | Do | How |
@@ -205,8 +207,8 @@ results above were measured on those datasets, which are not included.
 
 ## Questions and feedback
 
-Questions, ideas, or results on your own data: [Discussions](https://github.com/Sovik-Ghosh/SFM/discussions).
-Bugs: [Issues](https://github.com/Sovik-Ghosh/SFM/issues), with the command you ran and its `run.log`.
+Questions, ideas, or results on your own data: [Discussions](https://github.com/Sovik-Ghosh/sfm-cuda/discussions).
+Bugs: [Issues](https://github.com/Sovik-Ghosh/sfm-cuda/issues), with the command you ran and its `run.log`.
 
 ## License and citation
 

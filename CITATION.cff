@@ -9,11 +9,11 @@ abstract: >-
 authors:
   - family-names: Ghosh
     given-names: Sovik
-    # TODO: orcid: "https://orcid.org/XXXX-XXXX-XXXX-XXXX" (if you have one)
 license: Apache-2.0
 version: 1.1.0
 date-released: 2026-11-22
-# TODO: repository-code: URL of the public repository once it carries this code.
+repository-code: "https://github.com/Sovik-Ghosh/sfm-cuda"
+url: "https://sovik-ghosh.github.io/sfm-cuda/"
 keywords:
   - structure from motion
   - computer vision
