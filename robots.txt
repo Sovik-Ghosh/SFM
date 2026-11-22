@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://sovik-ghosh.github.io/sfm-cuda/sitemap.xml

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SFM: GPU Structure-from-Motion in C++ and CUDA (CPU or GPU)</title>
+<meta name="description" content="Open-source Structure-from-Motion (SfM) and photogrammetry in C++17 and CUDA: 3D reconstruction from photos with camera poses and a sparse point cloud, on an NVIDIA GPU or the CPU. Same results on both; 0.17° on the bunny dataset in 0.8 s.">
+<link rel="canonical" href="https://sovik-ghosh.github.io/sfm-cuda/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="SFM: GPU Structure-from-Motion in C++ and CUDA">
+<meta property="og:description" content="3D reconstruction from photos on an NVIDIA GPU or the CPU, with the same results. Open source, Apache 2.0.">
+<meta property="og:url" content="https://sovik-ghosh.github.io/sfm-cuda/">
+<meta property="og:image" content="https://sovik-ghosh.github.io/sfm-cuda/assets/sfm-gpu-structure-from-motion.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareSourceCode",
+  "name": "SFM",
+  "alternateName": "sfm-cuda",
+  "description": "Structure-from-Motion (SfM) and photogrammetry in C++17 and CUDA: 3D reconstruction from photos on an NVIDIA GPU or the CPU.",
+  "codeRepository": "https://github.com/Sovik-Ghosh/sfm-cuda",
+  "programmingLanguage": ["C++", "CUDA"],
+  "license": "https://www.apache.org/licenses/LICENSE-2.0",
+  "version": "1.1.0",
+  "keywords": "structure from motion, SfM, photogrammetry, 3D reconstruction, CUDA, GPU, bundle adjustment, SIFT, COLMAP alternative",
+  "author": {"@type": "Person", "name": "Sovik Ghosh"}
+}
+</script>
+<style>
+@font-face { font-family: "Gelasio"; src: url("assets/fonts/Gelasio-Medium.ttf"); font-display: swap; }
+@font-face { font-family: "Plex Sans"; src: url("assets/fonts/IBMPlexSans-Variable.ttf"); font-display: swap; }
+@font-face { font-family: "Plex Mono"; src: url("assets/fonts/IBMPlexMono-Regular.ttf"); font-display: swap; }
+:root { --bg: #000; --text: #f0f0f2; --muted: #a0a4ad; --faint: #6e737d; --line: #23252b; --accent: #8caaff; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.6 "Plex Sans", system-ui, sans-serif; }
+main { max-width: 1040px; margin: 0 auto; padding: 56px 24px 80px; }
+h1 { font: 500 64px/1.05 "Gelasio", Georgia, serif; margin: 0 0 12px; }
+h2 { font: 500 30px/1.2 "Gelasio", Georgia, serif; margin: 56px 0 16px; }
+p.lead { font-size: 21px; color: var(--muted); max-width: 760px; margin: 0 0 28px; }
+a { color: var(--accent); }
+.buttons a { display: inline-block; margin: 0 10px 10px 0; padding: 10px 18px; border: 1px solid var(--line); border-radius: 8px; text-decoration: none; color: var(--text); }
+.buttons a.primary { background: var(--accent); color: #000; border-color: var(--accent); }
+.gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 36px 0 0; }
+.gallery img { width: 100%; border-radius: 10px; border: 1px solid var(--line); }
+figcaption { color: var(--faint); font-size: 14px; margin-top: 6px; }
+ul { padding-left: 20px; } li { margin: 6px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 500; }
+td.num { font-family: "Plex Mono", monospace; }
+pre { background: #0d0e10; border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font: 14px/1.55 "Plex Mono", monospace; color: #d6d8de; }
+code { font-family: "Plex Mono", monospace; font-size: 0.92em; }
+.note { color: var(--faint); font-size: 14px; }
+footer { border-top: 1px solid var(--line); margin-top: 64px; padding-top: 20px; color: var(--faint); font-size: 14px; }
+@media (max-width: 720px) { h1 { font-size: 44px; } .gallery { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>SFM</h1>
+  <p class="lead">GPU Structure-from-Motion in C++17 and CUDA: 3D reconstruction from photos, with camera
+  poses and a sparse point cloud, on an NVIDIA GPU or the CPU. Every stage has both versions, and they
+  give the same results.</p>
+  <div class="buttons">
+    <a class="primary" href="https://github.com/Sovik-Ghosh/sfm-cuda">Code on GitHub</a>
+    <a href="https://github.com/Sovik-Ghosh/sfm-cuda/releases/latest">Download v1.1.0</a>
+    <a href="https://github.com/Sovik-Ghosh/sfm-cuda/discussions">Discussions</a>
+  </div>
+</header>
+
+<div class="gallery">
+  <figure style="margin:0">
+    <img src="assets/structure-from-motion-bunny-3d-point-cloud.gif" width="1200" height="750" alt="Structure-from-Motion 3D reconstruction of the bunny dataset: 36 cameras and a 5,960-point cloud turning in the SFM viewer">
+    <figcaption>Bunny: 36 / 36 views, 5,960 points, 0.17° median rotation error.</figcaption>
+  </figure>
+  <figure style="margin:0">
+    <img src="assets/structure-from-motion-middlebury-temple-3d-reconstruction.gif" width="1200" height="750" alt="Multi-view 3D reconstruction of the Middlebury templeRing with GPU Structure-from-Motion">
+    <figcaption>Middlebury templeRing: 47 / 47 views at 0.13° (COLMAP: 0.18°).</figcaption>
+  </figure>
+</div>
+
+<h2>What it does</h2>
+<p>Structure-from-Motion recovers where each photo was taken and a 3D model of the scene from the
+photos alone. SFM does it the way <a href="https://colmap.github.io/">COLMAP</a> does, incrementally,
+with every stage in CUDA:</p>
+<ul>
+  <li><b>Features:</b> SIFT and ORB, bit-identical on the CPU and the GPU.</li>
+  <li><b>Matching:</b> exact top-2 (SIFT on the tensor cores), ratio test, 5-point E-RANSAC or F-RANSAC.</li>
+  <li><b>Reconstruction:</b> initial pair, PnP, multi-view triangulation, outlier filtering, local and
+  global bundle adjustment with the Schur complement on the GPU; rigid multi-camera rigs.</li>
+  <li><b>Viewer:</b> watch a reconstruction run live, replay it, inspect cameras, compare two runs.</li>
+  <li><b>Library:</b> use it from your own C++ code (<code>sfm::pipeline::run_pipeline</code>).</li>
+</ul>
+
+<h2>Results</h2>
+<table>
+  <tr><th>Dataset</th><th>Images</th><th>Registered</th><th>Rotation error (median)</th><th>COLMAP</th></tr>
+  <tr><td>Bunny (included)</td><td class="num">36</td><td class="num">36</td><td class="num">0.17°</td><td class="num">0.28°</td></tr>
+  <tr><td>ETH3D courtyard</td><td class="num">38</td><td class="num">38</td><td class="num">0.030°</td><td class="num">0.034°</td></tr>
+  <tr><td>ETH3D delivery_area, one camera</td><td class="num">237</td><td class="num">237</td><td class="num">0.20°</td><td class="num">0.46°</td></tr>
+  <tr><td>Middlebury templeRing</td><td class="num">47</td><td class="num">47</td><td class="num">0.13°</td><td class="num">0.18°</td></tr>
+  <tr><td>ETH3D delivery_area, four-camera rig</td><td class="num">948</td><td class="num">948</td><td class="num">0.09°</td><td class="num">–</td></tr>
+</table>
+<p class="note">Errors against each dataset's ground truth. ETH3D and Middlebury data are not included in the repository.</p>
+
+<h2>CPU or GPU</h2>
+<table>
+  <tr><th>Config</th><th>Images</th><th>CPU</th><th>GPU</th><th>Speed-up</th></tr>
+  <tr><td>Bunny, ORB</td><td class="num">36</td><td class="num">2.3 s</td><td class="num">0.62 s</td><td class="num">3.8×</td></tr>
+  <tr><td>Bunny, SIFT</td><td class="num">36</td><td class="num">26 s</td><td class="num">0.79 s</td><td class="num">33×</td></tr>
+  <tr><td>Middlebury templeRing</td><td class="num">47</td><td class="num">48 s</td><td class="num">3.4 s</td><td class="num">14×</td></tr>
+  <tr><td>ETH3D courtyard (1550×1032)</td><td class="num">38</td><td class="num">292 s</td><td class="num">4.1 s</td><td class="num">71×</td></tr>
+  <tr><td>ETH3D delivery_area, one camera</td><td class="num">237</td><td class="num">105 s</td><td class="num">6.5 s</td><td class="num">16×</td></tr>
+</table>
+<p class="note">Ryzen 7 9700X (16 threads) against an RTX 5060 Ti; both give the same result on each. Measured with <code>bench_stages</code>.</p>
+
+<h2>Get started</h2>
+<pre>git clone https://github.com/Sovik-Ghosh/sfm-cuda.git
+cd sfm-cuda
+cmake --preset release &amp;&amp; cmake --build --preset release -j    # with CUDA 13
+# or, without an NVIDIA GPU:  cmake --preset cpu &amp;&amp; cmake --build --preset cpu -j
+./build/release/inference/apps/sfm_run configs/bunny_sift_tuned2.json
+./build/release/inference/apps/sfm_viewer outputs/bunny-sift-tuned2</pre>
+<p>A prebuilt CPU-only Linux binary is attached to the
+<a href="https://github.com/Sovik-Ghosh/sfm-cuda/releases/latest">latest release</a>. To reconstruct your own
+photos, see <a href="https://github.com/Sovik-Ghosh/sfm-cuda#use-your-own-images">Use your own images</a>
+in the README.</p>
+
+<div class="gallery">
+  <figure style="margin:0">
+    <img src="assets/sfm-viewer-live-3d-reconstruction.png" width="1440" height="900" alt="The SFM viewer showing a Structure-from-Motion reconstruction live, camera by camera">
+    <figcaption>Live run: cameras appear as they are registered.</figcaption>
+  </figure>
+  <figure style="margin:0">
+    <img src="assets/sfm-viewer-compare-two-reconstructions.png" width="1440" height="900" alt="The SFM viewer comparing two 3D reconstructions side by side with per-camera pose errors">
+    <figcaption>Compare: two runs aligned, with metric and per-camera differences.</figcaption>
+  </figure>
+</div>
+
+<footer>
+  SFM 1.1.0 · Apache 2.0 · <a href="https://github.com/Sovik-Ghosh/sfm-cuda">github.com/Sovik-Ghosh/sfm-cuda</a>
+  · Fonts: Gelasio, IBM Plex (SIL Open Font License)
+</footer>
+</main>
+</body>
+</html>
