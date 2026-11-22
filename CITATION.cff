@@ -2,7 +2,7 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it using these metadata."
 type: software
-title: "SFM: Structure from Motion in C++/CUDA"
+title: "Epipole: Structure from Motion in C++/CUDA"
 abstract: >-
   Incremental Structure-from-Motion built as a C++/CUDA library (libsfm):
   images in, camera poses and sparse 3D points out.

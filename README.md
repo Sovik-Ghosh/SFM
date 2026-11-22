@@ -2,10 +2,10 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./.github/assets/banner-dark.svg">
-  <img src="./.github/assets/banner-light.svg" alt="SFM: GPU Structure-from-Motion in C++ and CUDA" width="820">
+  <img src="./.github/assets/banner-light.svg" alt="Epipole: GPU Structure-from-Motion in C++ and CUDA" width="820">
 </picture>
 
-**Structure-from-Motion (SfM) and photogrammetry in C++17 and CUDA: 3D reconstruction from photos, with camera poses and a sparse point cloud, on an NVIDIA GPU or the CPU. An open-source, GPU-accelerated alternative to COLMAP for incremental SfM.**
+**Epipole is open-source Structure-from-Motion (SfM) and photogrammetry in C++17 and CUDA: 3D reconstruction from photos, with camera poses and a sparse point cloud, on an NVIDIA GPU or the CPU. A GPU-accelerated alternative to COLMAP for incremental SfM.**
 
 [![ci](https://github.com/Sovik-Ghosh/sfm-cuda/actions/workflows/ci.yml/badge.svg)](https://github.com/Sovik-Ghosh/sfm-cuda/actions/workflows/ci.yml)
 [![CUDA](https://img.shields.io/badge/CUDA-13.0-76B900?logo=nvidia&logoColor=white)](#requirements)
@@ -19,7 +19,7 @@
 
 ## What it does
 
-SFM is a Structure-from-Motion pipeline for 3D reconstruction from photos: it finds where each
+Epipole is a Structure-from-Motion pipeline for 3D reconstruction from photos: it finds where each
 photo was taken (camera poses) and builds a sparse 3D point cloud of the scene, the way
 [COLMAP](https://colmap.github.io/) does, with every stage on the GPU (or, without one, on the CPU).
 Use it for photogrammetry, multi-view geometry experiments, or as a C++/CUDA library:
@@ -169,7 +169,7 @@ Masks (optional) are `masks/0000.pgm`, …: black = object, everything else igno
 
 ```cmake
 set(SFM_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-add_subdirectory(path/to/SFM sfm)
+add_subdirectory(path/to/sfm-cuda sfm)
 target_link_libraries(my_app PRIVATE sfm::pipeline)
 ```
 
