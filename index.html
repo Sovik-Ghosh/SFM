@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SFM: GPU Structure-from-Motion in C++ and CUDA (CPU or GPU)</title>
-<meta name="description" content="Open-source Structure-from-Motion (SfM) and photogrammetry in C++17 and CUDA: 3D reconstruction from photos with camera poses and a sparse point cloud, on an NVIDIA GPU or the CPU. Same results on both; 0.17° on the bunny dataset in 0.8 s.">
+<title>Epipole: GPU Structure-from-Motion in C++ and CUDA (CPU or GPU)</title>
+<meta name="description" content="Epipole: open-source Structure-from-Motion (SfM) and photogrammetry in C++17 and CUDA: 3D reconstruction from photos with camera poses and a sparse point cloud, on an NVIDIA GPU or the CPU. Same results on both; 0.17° on the bunny dataset in 0.8 s.">
 <link rel="canonical" href="https://sovik-ghosh.github.io/sfm-cuda/">
 <meta property="og:type" content="website">
-<meta property="og:title" content="SFM: GPU Structure-from-Motion in C++ and CUDA">
+<meta property="og:title" content="Epipole: GPU Structure-from-Motion in C++ and CUDA">
 <meta property="og:description" content="3D reconstruction from photos on an NVIDIA GPU or the CPU, with the same results. Open source, Apache 2.0.">
 <meta property="og:url" content="https://sovik-ghosh.github.io/sfm-cuda/">
 <meta property="og:image" content="https://sovik-ghosh.github.io/sfm-cuda/assets/sfm-gpu-structure-from-motion.png">
@@ -18,8 +18,8 @@
 {
   "@context": "https://schema.org",
   "@type": "SoftwareSourceCode",
-  "name": "SFM",
-  "alternateName": "sfm-cuda",
+  "name": "Epipole",
+  "alternateName": ["sfm-cuda", "SFM"],
   "description": "Structure-from-Motion (SfM) and photogrammetry in C++17 and CUDA: 3D reconstruction from photos on an NVIDIA GPU or the CPU.",
   "codeRepository": "https://github.com/Sovik-Ghosh/sfm-cuda",
   "programmingLanguage": ["C++", "CUDA"],
@@ -61,8 +61,8 @@ footer { border-top: 1px solid var(--line); margin-top: 64px; padding-top: 20px;
 <body>
 <main>
 <header>
-  <h1>SFM</h1>
-  <p class="lead">GPU Structure-from-Motion in C++17 and CUDA: 3D reconstruction from photos, with camera
+  <h1>Epipole</h1>
+  <p class="lead">Epipole is GPU Structure-from-Motion in C++17 and CUDA: 3D reconstruction from photos, with camera
   poses and a sparse point cloud, on an NVIDIA GPU or the CPU. Every stage has both versions, and they
   give the same results.</p>
   <div class="buttons">
@@ -74,7 +74,7 @@ footer { border-top: 1px solid var(--line); margin-top: 64px; padding-top: 20px;
 
 <div class="gallery">
   <figure style="margin:0">
-    <img src="assets/structure-from-motion-bunny-3d-point-cloud.gif" width="1200" height="750" alt="Structure-from-Motion 3D reconstruction of the bunny dataset: 36 cameras and a 5,960-point cloud turning in the SFM viewer">
+    <img src="assets/structure-from-motion-bunny-3d-point-cloud.gif" width="1200" height="750" alt="Structure-from-Motion 3D reconstruction of the bunny dataset: 36 cameras and a 5,960-point cloud turning in the Epipole viewer">
     <figcaption>Bunny: 36 / 36 views, 5,960 points, 0.17° median rotation error.</figcaption>
   </figure>
   <figure style="margin:0">
@@ -85,7 +85,7 @@ footer { border-top: 1px solid var(--line); margin-top: 64px; padding-top: 20px;
 
 <h2>What it does</h2>
 <p>Structure-from-Motion recovers where each photo was taken and a 3D model of the scene from the
-photos alone. SFM does it the way <a href="https://colmap.github.io/">COLMAP</a> does, incrementally,
+photos alone. Epipole does it the way <a href="https://colmap.github.io/">COLMAP</a> does, incrementally,
 with every stage in CUDA:</p>
 <ul>
   <li><b>Features:</b> SIFT and ORB, bit-identical on the CPU and the GPU.</li>
@@ -132,17 +132,17 @@ in the README.</p>
 
 <div class="gallery">
   <figure style="margin:0">
-    <img src="assets/sfm-viewer-live-3d-reconstruction.png" width="1440" height="900" alt="The SFM viewer showing a Structure-from-Motion reconstruction live, camera by camera">
+    <img src="assets/sfm-viewer-live-3d-reconstruction.png" width="1440" height="900" alt="The Epipole viewer showing a Structure-from-Motion reconstruction live, camera by camera">
     <figcaption>Live run: cameras appear as they are registered.</figcaption>
   </figure>
   <figure style="margin:0">
-    <img src="assets/sfm-viewer-compare-two-reconstructions.png" width="1440" height="900" alt="The SFM viewer comparing two 3D reconstructions side by side with per-camera pose errors">
+    <img src="assets/sfm-viewer-compare-two-reconstructions.png" width="1440" height="900" alt="The Epipole viewer comparing two 3D reconstructions side by side with per-camera pose errors">
     <figcaption>Compare: two runs aligned, with metric and per-camera differences.</figcaption>
   </figure>
 </div>
 
 <footer>
-  SFM 1.1.0 · Apache 2.0 · <a href="https://github.com/Sovik-Ghosh/sfm-cuda">github.com/Sovik-Ghosh/sfm-cuda</a>
+  Epipole 1.1.0 · Apache 2.0 · <a href="https://github.com/Sovik-Ghosh/sfm-cuda">github.com/Sovik-Ghosh/sfm-cuda</a>
   · Fonts: Gelasio, IBM Plex (SIL Open Font License)
 </footer>
 </main>
