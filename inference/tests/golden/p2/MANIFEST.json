@@ -1,0 +1,29 @@
+{
+  "generator": "tools/make_golden_p2.py",
+  "versions": {
+    "numpy": "2.5.4",
+    "scipy": "1.18.1",
+    "opencv": "4.14.0"
+  },
+  "inputs": {
+    "data/bunny/images/0012.ppm": "01e8abeacfc170fd4c9deb572dcb0fef0e07d33e11afbd513e9447ab76fa98b3",
+    "data/bunny/silhouettes/0012.pgm": "4b0c815decee6b7c6ead5a2b4de0b95c1927abd41a551f03906c70a335cf968c",
+    "data/bunny/calib/0012.txt": "6611bbffe870e0074f692742dafb6cdc479560f1f93706d6d64495a8e4e50a4a",
+    "data/bunny/images/0013.ppm": "c2bf2f1b970e4383fcbae6e74956b426e443f7c7fb6bc018b49d92050cc6cfdd",
+    "data/bunny/silhouettes/0013.pgm": "1d5203168b361de57b6cbd8b8310beba272303134c763d0e98f37575fdce7421",
+    "data/bunny/calib/0013.txt": "1417404e65fa6c0469164ce1eafc209c826d9360e3be874e73254d3abf2e1fa3"
+  },
+  "outputs": {
+    "bf_knn_12_13.npy": "9c475e55fd32fbc342cfd56663d03ddf53da07e945a093722ea3ad50165b3ae0",
+    "orb_cv_0012_desc.npy": "8d50ff62a4b38eecbff185c5f81c89f894bd8375e759111f9f3c178242bc037c",
+    "orb_cv_0012_octave.npy": "a976d19fd9882a660131c872cfa264262b79fc9bb908e0f0524f5909f0aaa282",
+    "orb_cv_0012_xy.npy": "c8f8dbab364f9f4253c0ae8fc71b3a7f9aabee219f0fb19fbd538a12c4fcf368",
+    "orb_cv_0013_desc.npy": "4cb9403cf7893f630107d50541d169602b807cc651b3ba470b290a5238345da5",
+    "orb_cv_true_share_12_13.npy": "0b7a6613fe860be89733ad3367e6e4444d80609d1e621230c8b07c1b9c9656d3"
+  },
+  "notes": {
+    "orb_cv_true_share_12_13": 0.905144694533762,
+    "orb_cv_0012_keypoints": 1974,
+    "ratio_matches_12_13": 622
+  }
+}

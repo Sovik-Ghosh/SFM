@@ -1,0 +1,166 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}$env{SFM_BUILD_SUFFIX}",
+      "cacheVariables": {
+        "CMAKE_CUDA_ARCHITECTURES": "120"
+      }
+    },
+    {
+      "name": "debug",
+      "inherits": "base",
+      "displayName": "Debug (host -g, device -lineinfo)",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CUDA_FLAGS": "-lineinfo"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "displayName": "Release (-O3, -lineinfo for profiling)",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CUDA_FLAGS": "-lineinfo"
+      }
+    },
+    {
+      "name": "asan",
+      "inherits": "base",
+      "displayName": "Debug + AddressSanitizer/UBSan on host code",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+        "CMAKE_CUDA_FLAGS": "-Xcompiler=-fsanitize=address -Xcompiler=-fsanitize=undefined -Xcompiler=-fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
+      }
+    },
+    {
+      "name": "tsan",
+      "inherits": "base",
+      "displayName": "Debug -O1 + ThreadSanitizer on host code (threaded code: RunController, parallel_for)",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS": "-fsanitize=thread -O1 -fno-omit-frame-pointer",
+        "CMAKE_CUDA_FLAGS": "-Xcompiler=-fsanitize=thread -Xcompiler=-fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread",
+        "SFM_BUILD_VIEWER": "OFF",
+        "CMAKE_CROSSCOMPILING_EMULATOR": "setarch;x86_64;-R"
+      }
+    },
+    {
+      "name": "ci",
+      "inherits": "base",
+      "displayName": "CI: Release, warnings as errors, sm_87 + sm_120",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CUDA_ARCHITECTURES": "87;120",
+        "CMAKE_CUDA_FLAGS": "-lineinfo",
+        "SFM_WERROR": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan"
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
+      "targets": [
+        "test_viewer_core",
+        "test_core_parallel"
+      ]
+    },
+    {
+      "name": "ci",
+      "configurePreset": "ci"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "debug",
+      "inherits": "base",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "configurePreset": "release"
+    },
+    {
+      "name": "asan",
+      "inherits": "base",
+      "configurePreset": "asan",
+      "environment": {
+        "ASAN_OPTIONS": "protect_shadow_gap=0:detect_leaks=1"
+      }
+    },
+    {
+      "name": "tsan",
+      "inherits": "base",
+      "configurePreset": "tsan",
+      "displayName": "ThreadSanitizer: the multi-threaded host code",
+      "environment": {
+        "TSAN_OPTIONS": "halt_on_error=1:second_deadlock_stack=1"
+      },
+      "filter": {
+        "include": {
+          "name": "RunController|WithBackend|ParallelFor"
+        },
+        "exclude": {
+          "label": "cuda|slow|display"
+        }
+      }
+    },
+    {
+      "name": "ci-cpu",
+      "inherits": "base",
+      "configurePreset": "ci",
+      "displayName": "CI hosted runner: everything except GPU, slow and display tests",
+      "filter": {
+        "exclude": {
+          "label": "cuda|slow|display"
+        }
+      }
+    },
+    {
+      "name": "ci-gpu",
+      "inherits": "base",
+      "configurePreset": "ci",
+      "displayName": "CI GPU runner: all tests except display (no X server in CI)",
+      "filter": {
+        "exclude": {
+          "label": "display"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "schema_version": 6,
+  "run": { "name": "bunny-sift-tuned2", "output_dir": "outputs", "log_level": "info", "seed": 42 },
+  "device": { "index": 0 },
+  "dataset": {
+    "root": "data/bunny",
+    "images_dir": "images",
+    "masks_dir": "silhouettes",
+    "calib_dir": "calib",
+    "first": 0,
+    "last": 35,
+    "use_masks": true
+  },
+  "memory": { "arena_mb": 512, "max_images": 64, "max_kpts_per_image": 16384, "max_matches_per_pair": 20000 },
+  "features": {
+    "method": "sift_cuda", "max_features": 8192, "pyramid_levels": 8, "scale": 1.2,
+    "fast_threshold": 10, "edge_border": 31,
+    "sift": { "octaves": 4, "octave_resolution": 4, "first_octave": -1, "peak_threshold": 0.0015,
+              "edge_threshold": 10.0, "max_orientations": 2 }
+  },
+  "matching": {
+    "method": "bf_cuda", "ratio": 0.8, "mutual": true,
+    "ransac": { "model": "essential", "threshold_px": 1.0, "confidence": 0.999, "max_iters": 2000 },
+    "pairs": { "mode": "exhaustive", "window": 10, "keyframe_stride": 10 },
+    "min_inliers": 10
+  },
+  "reconstruction": {
+    "init_min_inliers": 50, "init_min_angle_deg": 5.0,
+    "pnp": { "threshold_px": 8.0, "min_inliers": 20, "min_inlier_ratio": 0.4, "max_iters": 1000 },
+    "min_correspondences": 30,
+    "triangulation": { "min_angle_deg": 2.0, "max_reproj_px": 4.0 },
+    "rig": false
+  },
+  "ba": { "method": "lm_schur_cuda", "huber_px": 2.0, "max_iters": 50, "every_n_cameras": 5,
+          "local_cameras": 10, "global_growth": 0.25, "final_huber_px": 0.3,
+          "final_max_iters": 10 },
+  "output": { "dump_stages": true, "ply": true, "colmap": true }
+}

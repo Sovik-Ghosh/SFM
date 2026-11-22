@@ -1,0 +1,36 @@
+# Build everything (CUDA code included) and run the tests that need no GPU, on GitHub's hosted
+# runners. The GPU tests run wherever a CUDA device is visible: `ctest --preset release`.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    container: nvidia/cuda:13.0.2-devel-ubuntu24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends cmake ninja-build g++ libglfw3-dev libgl-dev
+      - name: Configure
+        run: cmake --preset ci -G Ninja
+      - name: Build
+        run: cmake --build --preset ci
+      - name: Tests without a GPU
+        run: ctest --preset ci-cpu --output-on-failure

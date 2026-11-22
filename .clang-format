@@ -1,0 +1,16 @@
+# Project code style (third_party/ is excluded by scripts/ci/format_check.sh).
+BasedOnStyle: Google
+ColumnLimit: 100
+IndentWidth: 2
+DerivePointerAlignment: false
+PointerAlignment: Left
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^<gtest/'          # test framework first in tests
+    Priority: 1
+  - Regex: '^<[a-z_]+>$'       # C++ standard headers
+    Priority: 2
+  - Regex: '^<'                # other system / third-party headers (cuda_runtime.h, Eigen ...)
+    Priority: 3
+  - Regex: '^"sfm/'            # project headers
+    Priority: 4

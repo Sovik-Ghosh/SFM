@@ -1,0 +1,21 @@
+# Citation metadata (https://citation-file-format.github.io). GitHub shows a "Cite this repository" button.
+cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
+type: software
+title: "SFM: Structure from Motion in C++/CUDA"
+abstract: >-
+  Incremental Structure-from-Motion built as a C++/CUDA library (libsfm):
+  images in, camera poses and sparse 3D points out.
+authors:
+  - family-names: Ghosh
+    given-names: Sovik
+    # TODO: orcid: "https://orcid.org/XXXX-XXXX-XXXX-XXXX" (if you have one)
+license: Apache-2.0
+version: 1.0.2
+date-released: 2026-11-22
+# TODO: repository-code: URL of the public repository once it carries this code.
+keywords:
+  - structure from motion
+  - computer vision
+  - CUDA
+  - 3D reconstruction

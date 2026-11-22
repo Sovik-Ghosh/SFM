@@ -399,6 +399,15 @@ FodyWeavers.xsd
 # JetBrains Rider
 *.sln.iml
 
-/data/
+/data/*
+!/data/bunny/
 
 *.zip
+# --- SFM project ---
+/build/
+/outputs/
+/legacy/outputs/*/visualizations/
+compile_commands.json
+.cache/
+__pycache__/
+junit-*.xml
