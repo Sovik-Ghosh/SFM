@@ -22,4 +22,9 @@ int device_count();
 // Properties of one device. Throws CudaError for an invalid index.
 DeviceInfo query_device(int index);
 
+// Whether this build's kernels can run on the device: false when the binary has no code for its
+// architecture (built with CMAKE_CUDA_ARCHITECTURES that leave the GPU out). `why` gets the CUDA
+// error. Never throws.
+bool kernels_runnable(int index, std::string& why);
+
 }  // namespace sfm::core

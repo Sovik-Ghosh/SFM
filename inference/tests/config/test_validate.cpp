@@ -197,3 +197,31 @@ TEST(ConfigBunny, RepositoryConfigLoads) {
   EXPECT_EQ(c.features.max_features, 2000u);
   EXPECT_EQ(c.matching.min_inliers, 30u);
 }
+
+TEST_F(ConfigValidate, FolderLayoutAndSharedCamera) {
+  json j = valid_json();
+  j["dataset"]["layout"] = "folder";
+  j["dataset"]["last"] = -1;  // all images in the folder
+  EXPECT_EQ(problems(j), "");
+  j["dataset"]["last"] = -2;
+  EXPECT_NE(problems(j).find("dataset.last: must be >= dataset.first, or -1"), std::string::npos);
+  j["dataset"]["layout"] = "flat";
+  EXPECT_NE(problems(j).find("dataset.layout:"), std::string::npos);
+
+  j = valid_json();
+  j["dataset"]["last"] = -1;  // only the folder layout allows -1
+  EXPECT_NE(problems(j).find("dataset.last:"), std::string::npos);
+
+  // With a shared camera the calibration folder is not needed.
+  fs::remove(base_ / "ds" / "calib");
+  j = valid_json();
+  EXPECT_NE(problems(j).find("dataset.calib_dir:"), std::string::npos);
+  j["dataset"]["camera"] = {{"fx", 1000}};
+  EXPECT_EQ(problems(j), "");
+  j["dataset"]["camera"] = {{"exif", true}};
+  EXPECT_EQ(problems(j), "");
+  j["dataset"]["camera"] = {{"exif", true}, {"fx", 1000}};
+  EXPECT_NE(problems(j).find("set either fx or exif"), std::string::npos);
+  j["dataset"]["camera"] = {{"fy", 1000}};
+  EXPECT_NE(problems(j).find("dataset.camera.fx: must be set when fy is"), std::string::npos);
+}

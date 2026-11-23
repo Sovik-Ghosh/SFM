@@ -11,7 +11,7 @@
       "hidden": true,
       "binaryDir": "${sourceDir}/build/${presetName}$env{SFM_BUILD_SUFFIX}",
       "cacheVariables": {
-        "CMAKE_CUDA_ARCHITECTURES": "120"
+        "CMAKE_CUDA_ARCHITECTURES": "75;86;89;120"
       }
     },
     {

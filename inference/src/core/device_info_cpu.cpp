@@ -13,4 +13,9 @@ DeviceInfo query_device(int index) {
               "): this build has no CUDA support (SFM_WITH_CUDA=OFF)");
 }
 
+bool kernels_runnable(int, std::string& why) {
+  why = "built without CUDA";
+  return false;
+}
+
 }  // namespace sfm::core

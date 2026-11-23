@@ -15,6 +15,7 @@
 #include "sfm/core/trace.hpp"
 #include "sfm/data/calib.hpp"
 #include "sfm/data/image_io.hpp"
+#include "sfm/data/image_list.hpp"
 #include "sfm/data/krt.hpp"
 #include "sfm/data/rig.hpp"
 #include "sfm/eval/pose_error.hpp"
@@ -33,11 +34,6 @@ using Clock = std::chrono::steady_clock;
 
 double seconds_since(Clock::time_point t0) {
   return std::chrono::duration<double>(Clock::now() - t0).count();
-}
-
-std::string id_name(int id) {
-  const std::string s = std::to_string(id);
-  return std::string(s.size() < 4 ? 4 - s.size() : 0, '0') + s;
 }
 
 void write_text(const fs::path& file, const std::string& text) {
@@ -222,7 +218,9 @@ RunResult run_pipeline(const config::Config& cfg_in, const RunOptions& opt, core
            {{"run", cfg.run.name}, {"from", to_string(opt.from)}, {"to", to_string(opt.to)}});
   if (fallback) {
     log.warn("run.backend_fallback",
-             {{"reason", built_with_cuda() ? "no CUDA device visible" : "built without CUDA"},
+             {{"reason", !built_with_cuda()          ? std::string("built without CUDA")
+                         : !backend.unusable.empty() ? backend.unusable
+                                                     : std::string("no CUDA device visible")},
               {"features", cfg.features.method},
               {"matching", cfg.matching.method},
               {"ba", cfg.ba.method}});
@@ -244,19 +242,44 @@ RunResult run_pipeline(const config::Config& cfg_in, const RunOptions& opt, core
   auto t0 = Clock::now();
   const config::DatasetConfig& d = cfg.dataset;
   std::vector<int> ids;
+  std::vector<std::string> names;
   std::vector<data::Krt> gt;
   std::vector<Eigen::Matrix3d> K;
   std::vector<data::Image8> gray;
   std::vector<data::Image8> masks;
-  for (int id = d.first; id <= d.last; ++id) {
-    ids.push_back(id);
-    gt.push_back(data::decompose_projection(
-        data::read_projection(d.root / d.calib_dir / (id_name(id) + ".txt"))));
-    K.push_back(gt.back().K);
-    gray.push_back(data::load_gray(d.root / d.images_dir / (id_name(id) + ".ppm")));
-    if (d.use_masks) {
-      masks.push_back(data::load_mask(d.root / d.masks_dir / (id_name(id) + ".pgm")));
+  const auto files = data::list_images(d);
+  if (cfg.memory.max_images < files.size()) {
+    throw ConfigError("memory.max_images: " + std::to_string(cfg.memory.max_images) +
+                      " is less than the " + std::to_string(files.size()) + " images in the range");
+  }
+  int rotated = 0;
+  for (const data::ImageEntry& e : files) {
+    ids.push_back(e.id);
+    names.push_back(e.name);
+    gray.push_back(data::load_gray(e.image));
+    const bool same_width = gray.back().width == gray.front().width;
+    const bool same_height = gray.back().height == gray.front().height;
+    if (!same_width || !same_height) {
+      throw IoError("image " + e.image.string() + ": size " + std::to_string(gray.back().width) +
+                    "x" + std::to_string(gray.back().height) + " differs from the first image's " +
+                    std::to_string(gray.front().width) + "x" + std::to_string(gray.front().height));
     }
+    gt.push_back(data::load_camera(d, e, gray.back().width, gray.back().height));
+    K.push_back(gt.back().K);
+    if (d.use_masks) masks.push_back(data::load_mask(e.mask, d.mask_object_white));
+    if (data::exif_orientation(e.image) != 1) ++rotated;
+  }
+  if (d.camera.enabled()) {
+    log.info("dataset.camera", {{"fx", K.front()(0, 0)},
+                                {"fy", K.front()(1, 1)},
+                                {"cx", K.front()(0, 2)},
+                                {"cy", K.front()(1, 2)},
+                                {"exif", d.camera.exif}});
+  }
+  if (rotated > 0) {
+    log.warn("dataset.exif_orientation",
+             {{"images", rotated},
+              {"note", "EXIF says these photos are displayed rotated; they are read as stored"}});
   }
   res.timings.load = seconds_since(t0);
   log.info("stage.load", {{"images", static_cast<int>(ids.size())}, {"seconds", res.timings.load}});
@@ -434,10 +457,15 @@ RunResult run_pipeline(const config::Config& cfg_in, const RunOptions& opt, core
     t0 = Clock::now();
     if (cfg.output.ply) exporter::write_ply(res.run_dir / "model.ply", rec, point_gray);
     if (cfg.output.colmap) {
-      std::vector<std::string> names;
-      names.reserve(ids.size());
-      for (const int id : ids) names.push_back(id_name(id) + ".ppm");
-      exporter::write_colmap_text(res.run_dir / "colmap", rec, index, feats, names, point_gray);
+      exporter::write_colmap_text(res.run_dir / "colmap", rec, index, feats, names,
+                                  gray.front().width, gray.front().height, point_gray);
+    }
+    if (cfg.output.colmap_scene) {
+      std::vector<fs::path> sources;
+      sources.reserve(files.size());
+      for (const auto& e : files) sources.push_back(e.image);
+      exporter::write_colmap_scene(res.run_dir / "scene", rec, index, feats, sources,
+                                   gray.front().width, gray.front().height, point_gray);
     }
     res.timings.export_ = seconds_since(t0);
     end(Stage::kExport, res.timings.export_);

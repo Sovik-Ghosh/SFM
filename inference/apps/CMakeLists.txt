@@ -22,6 +22,8 @@ install(TARGETS sfm_run RUNTIME DESTINATION bin)
 add_executable(bench_stages bench_stages.cpp)
 target_link_libraries(bench_stages PRIVATE sfm::pipeline)
 sfm_set_warnings(bench_stages)
+# Release archives only: cmake --install <build> --component bench
+install(TARGETS bench_stages RUNTIME DESTINATION bin COMPONENT bench EXCLUDE_FROM_ALL)
 
 if(SFM_WITH_CUDA)
   add_executable(bench_features bench_features.cpp)
@@ -79,5 +81,7 @@ if(SFM_BUILD_VIEWER)
   # Fonts of the approved design (third_party/fonts, OFL); the app falls back to ImGui's own font
   # when the directory is missing.
   target_compile_definitions(sfm_viewer PRIVATE SFM_FONT_DIR="${PROJECT_SOURCE_DIR}/third_party/fonts")
+  install(TARGETS sfm_viewer RUNTIME DESTINATION bin)
+  install(DIRECTORY ${PROJECT_SOURCE_DIR}/third_party/fonts/ DESTINATION share/sfm/fonts)
   sfm_set_warnings(sfm_viewer)
 endif()

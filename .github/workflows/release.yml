@@ -1,0 +1,149 @@
+# Tag vX.Y.Z -> Linux x86-64 archives of the command-line tools and the viewer, attached to the
+# GitHub release with SHA256SUMS:
+#   epipole-X.Y.Z-linux-x86_64-cpu.tar.gz   no CUDA needed
+#   epipole-X.Y.Z-linux-x86_64-cuda.tar.gz  RTX 20xx-50xx (sm_75/86/89/120 + PTX); needs the NVIDIA
+#                                           driver and the CUDA 13 runtime libraries
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build (vX.Y.Z)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  archive:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - variant: cpu
+            preset: cpu
+            container: ubuntu:24.04
+          - variant: cuda
+            preset: release
+            container: nvidia/cuda:13.0.2-devel-ubuntu24.04
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    container: ${{ matrix.container }}
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - name: Install build tools
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends cmake ninja-build g++ libglfw3-dev libgl-dev
+      - name: Check tag matches project version
+        shell: bash
+        run: |
+          ver=$(sed -nE 's/^  VERSION ([0-9.]+)$/\1/p' CMakeLists.txt)
+          [[ "${TAG#v}" == "$ver" ]] || { echo "tag $TAG != CMake version $ver"; exit 1; }
+      - name: Build
+        run: |
+          cmake --preset ${{ matrix.preset }} -G Ninja -DSFM_BUILD_TESTS=OFF
+          cmake --build --preset ${{ matrix.preset }}
+      - name: Package
+        shell: bash
+        run: |
+          ver="${TAG#v}"
+          name="epipole-${ver}-linux-x86_64-${{ matrix.variant }}"
+          build="build/${{ matrix.preset }}"
+          cmake --install "$build" --prefix "dist/$name"
+          cmake --install "$build" --prefix "dist/$name" --component bench
+          mkdir -p "dist/$name/licenses"
+          cp LICENSE "dist/$name/"
+          cp third_party/eigen/COPYING.MPL2 "dist/$name/licenses/eigen-COPYING.MPL2"
+          cp third_party/nlohmann/LICENSE.MIT "dist/$name/licenses/nlohmann-json-LICENSE.MIT"
+          cp third_party/stb/LICENSE "dist/$name/licenses/stb-LICENSE"
+          cp third_party/imgui/LICENSE.txt "dist/$name/licenses/imgui-LICENSE.txt"
+          cp third_party/fonts/*.txt "dist/$name/licenses/" 2>/dev/null || true
+          if [[ "${{ matrix.variant }}" == cuda ]]; then
+            needs="Needs the NVIDIA driver and the CUDA 13 runtime libraries (libcudart, cuSOLVER,
+          cuBLAS; Ubuntu: sudo apt install cuda-libraries-13-0 from NVIDIA's repository), or copy
+          them into lib/ next to bin/. Built for RTX 20xx to 50xx (sm_75, 86, 89, 120); another GPU
+          runs on the CPU, and the run log says so."
+          else
+            needs="Needs no CUDA and no GPU. Configs that ask for CUDA methods run on their CPU
+          versions."
+          fi
+          cat > "dist/$name/README.txt" <<EOF
+          Epipole ${ver}: Structure-from-Motion in C++ and CUDA, Linux x86-64 (${{ matrix.variant }})
+          Built on Ubuntu 24.04 (glibc 2.39, GCC 13).
+          ${needs}
+
+            bin/sfm_run       reconstruct from a config:  sfm_run configs/bunny_sift_tuned2.json
+            bin/sfm_viewer    view a run or watch one live (needs OpenGL 3.3 and libglfw3)
+            bin/bench_stages  time per stage, CPU vs GPU
+            bin/sfm_version   version and CUDA devices
+
+          The configs and the bunny dataset are in the repository:
+            git clone --depth 1 https://github.com/Sovik-Ghosh/sfm-cuda.git
+          Run from the clone; results go to outputs/<run name>/. Your own photos: see "Use your
+          own images" in the README.
+
+          License: Apache 2.0 (LICENSE). Third-party code: Eigen (MPL 2.0), nlohmann/json (MIT),
+          stb (public domain / MIT), Dear ImGui (MIT), fonts (SIL OFL); see licenses/.
+          EOF
+          # No absolute path of this machine may remain in the binaries' search path.
+          for b in "dist/$name"/bin/*; do
+            if readelf -d "$b" | grep -E 'R(UN)?PATH' | grep -v '\$ORIGIN/../lib'; then
+              echo "$b: unexpected RPATH"; exit 1
+            fi
+          done
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.variant }}
+          path: dist/*.tar.gz
+
+  smoke-test:
+    # The CPU archive on a bare runner: unpack, run the bunny from a clone.
+    needs: archive
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: cpu
+      - name: Run the CPU archive on the bunny
+        run: |
+          tar xzf epipole-*-cpu.tar.gz
+          ./epipole-*-cpu/bin/sfm_version
+          ./epipole-*-cpu/bin/sfm_run configs/bunny.json
+          python3 -c "import json; m = json.load(open('outputs/bunny-baseline/metrics.json')); assert m['registered'] >= 34, m"
+
+  publish:
+    needs: [archive, smoke-test]
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Checksums
+        run: sha256sum epipole-*.tar.gz | tee SHA256SUMS
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" epipole-*.tar.gz SHA256SUMS --clobber -R "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" epipole-*.tar.gz SHA256SUMS -R "$GITHUB_REPOSITORY" \
+              --title "Epipole ${TAG#v}" --generate-notes
+          fi

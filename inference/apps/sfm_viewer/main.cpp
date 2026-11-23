@@ -184,6 +184,22 @@ void apply_input(const std::vector<ScriptEvent>& events) {
 
 }  // namespace
 
+// The fonts: $SFM_FONT_DIR, then next to the binary (<bin>/../share/sfm/fonts for an install or a
+// release archive, <bin>/fonts), then the source tree this binary was built from.
+static std::string font_dir() {
+  namespace fs = std::filesystem;
+  if (const char* env = std::getenv("SFM_FONT_DIR"); env != nullptr && *env != '\0') return env;
+  std::error_code ec;
+  const fs::path exe = fs::read_symlink("/proc/self/exe", ec);
+  if (!ec) {
+    const fs::path bin = exe.parent_path();
+    for (const fs::path& d : {bin / ".." / "share" / "sfm" / "fonts", bin / "fonts"}) {
+      if (fs::is_directory(d, ec)) return d.lexically_normal().string();
+    }
+  }
+  return SFM_FONT_DIR;
+}
+
 int main(int argc, char** argv) {
   std::string source;
   std::string screenshot;
@@ -282,7 +298,7 @@ int main(int argc, char** argv) {
   ImGui::CreateContext();
   ImGui::GetIO().IniFilename = nullptr;  // no imgui.ini next to the binary
   ImGui::StyleColorsDark();
-  sfm::viewer::theme::load_fonts(SFM_FONT_DIR);
+  sfm::viewer::theme::load_fonts(font_dir().c_str());
   sfm::viewer::theme::apply_style();
   ImGui_ImplGlfw_InitForOpenGL(window, true);
   ImGui_ImplOpenGL3_Init("#version 330 core");

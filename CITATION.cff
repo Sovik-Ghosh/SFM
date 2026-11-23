@@ -10,8 +10,8 @@ authors:
   - family-names: Ghosh
     given-names: Sovik
 license: Apache-2.0
-version: 1.1.0
-date-released: 2026-11-22
+version: 1.2.0
+date-released: 2026-11-23
 repository-code: "https://github.com/Sovik-Ghosh/sfm-cuda"
 url: "https://sovik-ghosh.github.io/sfm-cuda/"
 keywords:

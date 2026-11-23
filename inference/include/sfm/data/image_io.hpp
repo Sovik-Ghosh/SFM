@@ -1,6 +1,7 @@
 #pragma once
 // Image loading for the dataset: RGB -> 8-bit gray, silhouette -> binary mask. Formats: whatever
-// stb_image reads (PPM/PGM used by the bunny set, PNG). Pixels are row-major, width * height bytes.
+// stb_image reads here: PPM/PGM (the bunny set), PNG and JPEG (baseline and progressive; EXIF
+// orientation is not applied). Pixels are row-major, width * height bytes.
 
 #include <cstddef>
 #include <cstdint>
@@ -27,7 +28,8 @@ inline std::uint8_t rgb_to_gray(std::uint8_t r, std::uint8_t g, std::uint8_t b) 
 Image8 load_gray(const std::filesystem::path& path);
 
 // Silhouette -> mask: 255 where the file is 0 (object), 0 elsewhere. The bunny silhouettes are not
-// binary (19 distinct values), so this is an equality test, not a threshold. Throws IoError.
-Image8 load_mask(const std::filesystem::path& path);
+// binary (19 distinct values), so this is an equality test, not a threshold. With object_white
+// (dataset.mask_object "white"): 255 where the file is > 127, the usual convention. Throws IoError.
+Image8 load_mask(const std::filesystem::path& path, bool object_white = false);
 
 }  // namespace sfm::data

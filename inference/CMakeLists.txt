@@ -41,6 +41,7 @@ add_library(sfm_data
   src/data/calib.cpp
   src/data/dataset.cpp
   src/data/image_io.cpp
+  src/data/image_list.cpp
   src/data/krt.cpp
   src/data/rig.cpp)
 add_library(sfm::data ALIAS sfm_data)
@@ -148,7 +149,7 @@ add_library(sfm_export
   src/export/colmap_text.cpp
   src/export/ply.cpp)
 add_library(sfm::export ALIAS sfm_export)
-target_link_libraries(sfm_export PUBLIC sfm::recon)
+target_link_libraries(sfm_export PUBLIC sfm::recon PRIVATE sfm::stb)
 sfm_set_warnings(sfm_export)
 
 # Pipeline: method registry, stage dumps, metrics; used by apps/sfm_run.

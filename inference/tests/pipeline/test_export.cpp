@@ -50,10 +50,11 @@ TEST(Export, PlyAndColmapText) {
   EXPECT_NE(text.find(" 77 77 77\n"), std::string::npos);
 
   sfm::exporter::write_colmap_text(dir / "colmap", rec, idx, in.features, {"a", "b", "c", "d"},
-                                   gray);
+                                   1000, 700, gray);
   const auto cams = data_lines(dir / "colmap" / "cameras.txt");
   ASSERT_EQ(cams.size(), 4u);
-  EXPECT_EQ(cams[0].rfind("1 PINHOLE 1024 768 1200 1200 512 384", 0), 0u) << cams[0];
+  // The given image size (not 2 cx x 2 cy), and cx, cy + 0.5 for COLMAP's pixel convention.
+  EXPECT_EQ(cams[0].rfind("1 PINHOLE 1000 700 1200 1200 512.5 384.5", 0), 0u) << cams[0];
   const auto imgs = data_lines(dir / "colmap" / "images.txt");
   ASSERT_EQ(imgs.size(), 8u);  // two lines per image
   EXPECT_NE(imgs[0].find(" 1 a"), std::string::npos);

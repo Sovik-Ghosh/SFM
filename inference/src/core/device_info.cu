@@ -3,6 +3,12 @@
 
 namespace sfm::core {
 
+namespace {
+__global__ void probe_kernel(int* p) {
+  if (p != nullptr) *p = 1;
+}
+}  // namespace
+
 int device_count() {
   int count = 0;
   if (cudaGetDeviceCount(&count) != cudaSuccess) {
@@ -26,6 +32,25 @@ DeviceInfo query_device(int index) {
   info.shared_mem_per_block = prop.sharedMemPerBlock;
   info.total_global_mem = prop.totalGlobalMem;
   return info;
+}
+
+bool kernels_runnable(int index, std::string& why) {
+  int previous = 0;
+  if (cudaGetDevice(&previous) != cudaSuccess || cudaSetDevice(index) != cudaSuccess) {
+    why = cudaGetErrorString(cudaGetLastError());
+    return false;
+  }
+  // Resolving a kernel's attributes needs its code for this device (SASS, or PTX the driver can
+  // JIT): the same check every launch would fail, without launching anything.
+  cudaFuncAttributes attr{};
+  const cudaError_t e = cudaFuncGetAttributes(&attr, probe_kernel);
+  cudaGetLastError();  // not sticky, but clear it for the caller
+  cudaSetDevice(previous);
+  if (e != cudaSuccess) {
+    why = cudaGetErrorString(e);
+    return false;
+  }
+  return true;
 }
 
 }  // namespace sfm::core

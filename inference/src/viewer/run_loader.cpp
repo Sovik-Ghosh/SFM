@@ -7,6 +7,7 @@
 #include "sfm/core/error.hpp"
 #include "sfm/data/calib.hpp"
 #include "sfm/data/image_io.hpp"
+#include "sfm/data/image_list.hpp"
 #include "sfm/data/krt.hpp"
 #include "sfm/pipeline/stage_io.hpp"
 
@@ -15,11 +16,6 @@ namespace sfm::viewer {
 namespace fs = std::filesystem;
 
 namespace {
-
-std::string id_name(int id) {
-  const std::string s = std::to_string(id);
-  return std::string(s.size() < 4 ? 4 - s.size() : 0, '0') + s;
-}
 
 std::string read_text(const fs::path& f) {
   std::ifstream in(f);
@@ -33,9 +29,13 @@ std::string read_text(const fs::path& f) {
 
 std::vector<eval::Pose> load_truth(const config::DatasetConfig& d) {
   std::vector<eval::Pose> out;
-  for (int id = d.first; id <= d.last; ++id) {
-    const auto krt = data::decompose_projection(
-        data::read_projection(d.root / d.calib_dir / (id_name(id) + ".txt")));
+  if (d.camera.enabled()) {  // no calibration files: no ground truth (every pose is identity)
+    const eval::Pose identity{Eigen::Matrix3d::Identity(), Eigen::Vector3d::Zero()};
+    out.assign(data::list_images(d).size(), identity);
+    return out;
+  }
+  for (const auto& e : data::list_images(d)) {
+    const auto krt = data::decompose_projection(data::read_projection(e.calib));
     out.push_back({krt.R, krt.t});
   }
   return out;
@@ -85,7 +85,14 @@ CameraGroups load_camera_groups(const config::DatasetConfig& d) {
 }
 
 fs::path image_path(const config::DatasetConfig& d, int id) {
-  return d.root / d.images_dir / (id_name(id) + ".ppm");
+  if (d.layout != "folder") {
+    const std::string s = std::to_string(id);
+    return d.root / d.images_dir / (std::string(s.size() < 4 ? 4 - s.size() : 0, '0') + s + ".ppm");
+  }
+  for (const auto& e : data::list_images(d)) {
+    if (e.id == id) return e.image;
+  }
+  return {};
 }
 
 std::vector<pipeline::SceneSnapshot> replay_snapshots(const recon::Reconstruction& rec,
@@ -138,13 +145,12 @@ LoadedRun load_run(const fs::path& run_dir) {
   std::vector<int> ids;
   std::vector<Eigen::Matrix3d> K;
   std::vector<data::Image8> gray;
-  for (int id = d.first; id <= d.last; ++id) {
-    ids.push_back(id);
-    const auto krt = data::decompose_projection(
-        data::read_projection(d.root / d.calib_dir / (id_name(id) + ".txt")));
+  for (const auto& e : data::list_images(d)) {
+    ids.push_back(e.id);
+    gray.push_back(data::load_gray(e.image));
+    const auto krt = data::load_camera(d, e, gray.back().width, gray.back().height);
     K.push_back(krt.K);
     r.truth.push_back({krt.R, krt.t});
-    gray.push_back(data::load_gray(image_path(d, id)));
   }
   const auto features = pipeline::load_features(st / "features", ids.size());
   const auto tracks = pipeline::load_tracks(st / "tracks");

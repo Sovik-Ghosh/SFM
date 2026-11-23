@@ -1,11 +1,11 @@
 #pragma once
 // The dataset in host memory: gray images and masks in one contiguous pinned block each (a single
 // async upload), plus the ground-truth projection matrices and their K, R, t.
-// File names follow the Bonn layout, for ids first..last:
-// <images_dir>/NNNN.ppm, <masks_dir>/NNNN.pgm, <calib_dir>/NNNN.txt.
+// Which files are read: image_list.hpp (the bunny's NNNN.ppm layout, or a folder of photos).
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "sfm/config/config.hpp"
@@ -27,8 +27,10 @@ struct Dataset {
   int height = 0;
   core::PinnedBuffer<std::uint8_t> gray;   // count() * pixels(); image i starts at i * pixels()
   core::PinnedBuffer<std::uint8_t> masks;  // same layout; empty when use_masks is false
-  std::vector<Mat34> P;                    // ground-truth projection per image
+  std::vector<Mat34> P;                    // projection per image (K [I | 0] with dataset.camera)
   std::vector<Krt> cameras;                // decompose_projection(P[i]): K, R, t per image
+  // Image file names, in load order.
+  std::vector<std::string> names;
 
   std::size_t count() const { return ids.size(); }
   std::size_t pixels() const {

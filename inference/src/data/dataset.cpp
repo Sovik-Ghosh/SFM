@@ -8,18 +8,12 @@
 #endif
 #include "sfm/core/error.hpp"
 #include "sfm/data/image_io.hpp"
+#include "sfm/data/image_list.hpp"
 #include "sfm/data/krt.hpp"
 
 namespace sfm::data {
 
 namespace {
-
-// 7, "ppm" -> "0007.ppm" (ids are 0..9999, checked by the caller)
-std::string file_name(int id, const char* ext) {
-  std::string s = std::to_string(id);
-  s.insert(0, s.size() < 4 ? 4 - s.size() : 0, '0');
-  return s + "." + ext;
-}
 
 // Copies one loaded image into slot i of a contiguous buffer, checking its size.
 void place(const Image8& img, const std::filesystem::path& path, Dataset& ds,
@@ -35,34 +29,30 @@ void place(const Image8& img, const std::filesystem::path& path, Dataset& ds,
 }  // namespace
 
 Dataset load_dataset(const config::DatasetConfig& cfg, core::Logger& log) {
-  if (cfg.first < 0 || cfg.last < cfg.first || cfg.last > 9999) {
-    throw IoError("dataset: invalid id range " + std::to_string(cfg.first) + ".." +
-                  std::to_string(cfg.last));
-  }
-  const auto n = static_cast<std::size_t>(cfg.image_count());
-  const auto images = cfg.root / cfg.images_dir;
-  const auto masks = cfg.root / cfg.masks_dir;
-  const auto calib = cfg.root / cfg.calib_dir;
+  const auto files = list_images(cfg);
+  const std::size_t n = files.size();
 
   Dataset ds;
-  for (int id = cfg.first; id <= cfg.last; ++id) {
+  for (const ImageEntry& e : files) {
     const std::size_t i = ds.ids.size();
-    const auto image_path = images / file_name(id, "ppm");
-    const Image8 gray = load_gray(image_path);
+    const Image8 gray = load_gray(e.image);
     if (i == 0) {  // first image fixes the size and the buffer layout
       ds.width = gray.width;
       ds.height = gray.height;
       ds.gray = core::PinnedBuffer<std::uint8_t>(n * ds.pixels());
       if (cfg.use_masks) ds.masks = core::PinnedBuffer<std::uint8_t>(n * ds.pixels());
     }
-    place(gray, image_path, ds, ds.gray, i);
-    if (cfg.use_masks) {
-      const auto mask_path = masks / file_name(id, "pgm");
-      place(load_mask(mask_path), mask_path, ds, ds.masks, i);
+    place(gray, e.image, ds, ds.gray, i);
+    if (cfg.use_masks) place(load_mask(e.mask, cfg.mask_object_white), e.mask, ds, ds.masks, i);
+    if (e.calib.empty()) {  // dataset.camera: P = K [I | 0]
+      ds.cameras.push_back(load_camera(cfg, e, gray.width, gray.height));
+      ds.P.push_back(compose_projection(ds.cameras.back()));
+    } else {  // the file's P as written (any scale)
+      ds.P.push_back(read_projection(e.calib));
+      ds.cameras.push_back(decompose_projection(ds.P.back()));
     }
-    ds.P.push_back(read_projection(calib / file_name(id, "txt")));
-    ds.cameras.push_back(decompose_projection(ds.P.back()));
-    ds.ids.push_back(id);
+    ds.ids.push_back(e.id);
+    ds.names.push_back(e.name);
   }
 
   log.info("dataset.loaded", {{"root", cfg.root.string()},

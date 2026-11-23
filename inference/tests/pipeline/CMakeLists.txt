@@ -24,6 +24,15 @@ if(TARGET test_e2e_bunny_cuda)  # skipped in CPU-only builds
   target_compile_definitions(test_e2e_bunny_cuda PRIVATE SFM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 endif()
 
+# The bunny as a folder of renamed PNGs ("folder" layout) and the COLMAP scene export.
+sfm_add_test(test_e2e_bunny_folder
+  SOURCES test_e2e_bunny_folder.cpp
+  LIBS sfm::pipeline sfm::stb
+  LABELS slow cuda)
+if(TARGET test_e2e_bunny_folder)  # skipped in CPU-only builds
+  target_compile_definitions(test_e2e_bunny_folder PRIVATE SFM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+endif()
+
 # "auto" backend and progress / cancel on bunny with the GPU (fast).
 sfm_add_test(test_progress
   SOURCES test_backend_gpu.cpp test_progress.cpp

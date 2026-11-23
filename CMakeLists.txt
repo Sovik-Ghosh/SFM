@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(SFM
-  VERSION 1.1.0
+  VERSION 1.2.0
   DESCRIPTION "Incremental Structure-from-Motion, C++/CUDA runtime"
   LANGUAGES CXX)
 
@@ -17,12 +17,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(SFM_WITH_CUDA)
+  # Default: Turing to Blackwell consumer GPUs (RTX 20xx 75, 30xx 86, 40xx 89, 50xx 120), plus PTX
+  # of each so newer GPUs JIT-compile. sm_72 is the minimum (u8 tensor-core matching). A GPU left
+  # out of the list makes the run fall back to the CPU (logged as run.backend_fallback).
   if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    set(CMAKE_CUDA_ARCHITECTURES 120)
+    set(CMAKE_CUDA_ARCHITECTURES "75;86;89;120")
   endif()
   enable_language(CUDA)
   set(CMAKE_CUDA_STANDARD 17)
   set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+endif()
+
+# Installed programs look for bundled libraries in <prefix>/lib, then the system paths (not the
+# build machine's CUDA directory), so an install tree or release archive can be moved.
+if(NOT DEFINED CMAKE_INSTALL_RPATH)
+  set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib")
 endif()
 
 if(NOT CMAKE_BUILD_TYPE)

@@ -677,8 +677,10 @@ void App::setup_rail(float w) {
     if (ui::button("Open", ButtonKind::kSecondary, ImVec2(56, 30))) open_config(config_input_);
     if (have_config_) {
       ui::text(font_set().mono, theme::kCaption, theme::kTextFaint,
-               format("%s · %d images", config_.dataset.root.filename().string().c_str(),
-                      config_.dataset.image_count())
+               (config_.dataset.image_count() < 0
+                    ? format("%s · all images", config_.dataset.root.filename().string().c_str())
+                    : format("%s · %d images", config_.dataset.root.filename().string().c_str(),
+                             config_.dataset.image_count()))
                    .c_str());
     }
     ImGui::Dummy(ImVec2(1, 10));

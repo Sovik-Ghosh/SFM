@@ -67,6 +67,9 @@ class Section {
 
   Section object(const std::string& key) { return Section(get(key), at(key)); }
 
+  // For optional keys: true when present (then read it with the typed getters).
+  bool has(const std::string& key) const { return j_.contains(key); }
+
   void finish() const {
     for (const auto& item : j_.items()) {
       if (used_.count(item.key()) == 0) throw ConfigError(at(item.key()) + ": unknown key");
@@ -146,6 +149,27 @@ Config parse_config(std::string_view json_text) {
   c.dataset.first = ds.integer<int>("first");
   c.dataset.last = ds.integer<int>("last");
   c.dataset.use_masks = ds.boolean("use_masks");
+  if (ds.has("layout")) c.dataset.layout = ds.str("layout");
+  if (ds.has("mask_object")) {
+    const std::string mo = ds.str("mask_object");
+    if (mo != "black" && mo != "white") {
+      throw ConfigError(ds.at("mask_object") + ": expected \"black\" or \"white\", got \"" + mo +
+                        "\"");
+    }
+    c.dataset.mask_object_white = mo == "white";
+  }
+  if (ds.has("camera")) {
+    Section cam = ds.object("camera");
+    config::CameraConfig& k = c.dataset.camera;
+    if (cam.has("fx")) k.fx = cam.number("fx");
+    if (cam.has("fy")) k.fy = cam.number("fy");
+    if (cam.has("cx")) k.cx = cam.number("cx");
+    if (cam.has("cy")) k.cy = cam.number("cy");
+    if (cam.has("exif")) k.exif = cam.boolean("exif");
+    if (cam.has("sensor_width_mm")) k.sensor_width_mm = cam.number("sensor_width_mm");
+    if (cam.has("fx_default_factor")) k.fx_default_factor = cam.number("fx_default_factor");
+    cam.finish();
+  }
   ds.finish();
 
   Section mem = top.object("memory");
@@ -222,6 +246,7 @@ Config parse_config(std::string_view json_text) {
   c.output.dump_stages = out.boolean("dump_stages");
   c.output.ply = out.boolean("ply");
   c.output.colmap = out.boolean("colmap");
+  if (out.has("colmap_scene")) c.output.colmap_scene = out.boolean("colmap_scene");
   out.finish();
 
   top.finish();
@@ -260,6 +285,18 @@ std::string to_json(const Config& c) {
                   {"first", c.dataset.first},
                   {"last", c.dataset.last},
                   {"use_masks", c.dataset.use_masks}};
+  if (c.dataset.layout != "numbered") j["dataset"]["layout"] = c.dataset.layout;
+  if (c.dataset.mask_object_white) j["dataset"]["mask_object"] = "white";
+  if (c.dataset.camera.enabled()) {
+    const CameraConfig& k = c.dataset.camera;
+    j["dataset"]["camera"] = {{"fx", k.fx},
+                              {"fy", k.fy},
+                              {"cx", k.cx},
+                              {"cy", k.cy},
+                              {"exif", k.exif},
+                              {"sensor_width_mm", k.sensor_width_mm},
+                              {"fx_default_factor", k.fx_default_factor}};
+  }
   j["memory"] = {{"arena_mb", c.memory.arena_mb},
                  {"max_images", c.memory.max_images},
                  {"max_kpts_per_image", c.memory.max_kpts_per_image},
@@ -314,6 +351,7 @@ std::string to_json(const Config& c) {
              {"final_max_iters", c.ba.final_max_iters}};
   j["output"] = {
       {"dump_stages", c.output.dump_stages}, {"ply", c.output.ply}, {"colmap", c.output.colmap}};
+  if (c.output.colmap_scene) j["output"]["colmap_scene"] = true;
   return j.dump(2) + "\n";
 }
 

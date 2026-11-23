@@ -170,8 +170,18 @@ const BaMethod& Registry::ba(const std::string& name) const { return find(ba_, n
 Backend detect_backend() {
   Backend b;
   if (core::device_count() > 0) {
-    b.gpu = true;
-    b.device = core::query_device(0).name;
+    const core::DeviceInfo info = core::query_device(0);
+    b.device = info.name;
+    std::string why;
+    if (core::kernels_runnable(0, why)) {
+      b.gpu = true;
+    } else {
+      // e.g. a build for sm_120 only on an RTX 3060 (sm_86): run on the CPU instead of failing.
+      b.unusable = info.name + " (sm_" + std::to_string(info.cc_major) +
+                   std::to_string(info.cc_minor) + "): " + why +
+                   "; rebuild with -DCMAKE_CUDA_ARCHITECTURES=" + std::to_string(info.cc_major) +
+                   std::to_string(info.cc_minor);
+    }
   }
   return b;
 }

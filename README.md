@@ -41,25 +41,33 @@ from a four-camera rig it registers every image at 0.09°–0.36° in 1–5 minu
 |---|---|---|
 | CMake | ≥ 3.24 | |
 | C++ compiler | C++17 | tested with GCC 13 |
-| CUDA Toolkit + NVIDIA GPU | 13.0 | **optional**: without them, build the CPU-only version (below) |
+| CUDA Toolkit + NVIDIA GPU | 13.0, RTX 20xx or newer (`sm_75`+) | **optional**: without them, build the CPU-only version (below) |
 | GLFW 3 + OpenGL headers | | only for the viewer: `sudo apt install libglfw3-dev libgl-dev` |
 
+No OpenCV, no Ceres: the only dependencies are CUDA (optional) and the header-only libraries in
+[`third_party/`](third_party/) (Eigen, nlohmann/json, stb, Dear ImGui), plus GLFW for the viewer.
+
 Every stage has a CPU and a CUDA version, and both give the same results; the GPU is 4–70× faster
-([benchmark](#cpu-vs-gpu)). GPU builds are tested on an RTX 5060 Ti (`sm_120`, the default); for
-other GPUs add `-DCMAKE_CUDA_ARCHITECTURES=<arch>` (for example `86` for an RTX 30xx, `89` for an
-RTX 40xx).
+([benchmark](#cpu-vs-gpu)). The default build runs on RTX 20xx to 50xx (`sm_75`, `86`, `89`,
+`120`); tested on an RTX 5060 Ti. A GPU outside that list runs on the CPU, and the run log says so
+and names the flag to add (`-DCMAKE_CUDA_ARCHITECTURES=<arch>`, e.g. `90` for an H100).
 
 ## Build
 
 ```bash
-git clone https://github.com/Sovik-Ghosh/sfm-cuda.git
+git clone --depth 1 https://github.com/Sovik-Ghosh/sfm-cuda.git   # --depth 1: 50 MB instead of 440 MB
 cd sfm-cuda
-cmake --preset release                 # add -DCMAKE_CUDA_ARCHITECTURES=<arch> for other GPUs
+cmake --preset release
 cmake --build --preset release -j
 ctest --preset release                 # optional: the tests (GPU tests need a visible GPU)
 ```
 
-The programs are in `build/release/inference/apps/`.
+The programs are in `build/release/inference/apps/`. Without the GLFW packages the build skips the
+viewer (the configure output says so).
+
+**Prebuilt binaries:** the [latest release](https://github.com/Sovik-Ghosh/sfm-cuda/releases/latest)
+has Linux x86-64 archives, CPU-only and CUDA (the CUDA one needs the CUDA 13 runtime libraries).
+Run them from a clone, which holds the configs and the bunny.
 
 **No NVIDIA GPU or no CUDA toolkit?** Build the CPU-only version; everything else below works the
 same, with `build/cpu/` instead of `build/release/`:
@@ -90,6 +98,7 @@ A run writes `outputs/<run name>/`:
 |---|---|
 | `model.ply` | the point cloud (MeshLab, CloudCompare, Blender) |
 | `colmap/` | cameras, images and points in COLMAP's text format |
+| `scene/` | with `"output": {"colmap_scene": true}`: `images/` + `sparse/0/`, the folder 3D Gaussian Splatting, nerfstudio and gsplat open as it is |
 | `metrics.json` | registered images, points, reprojection error, errors against the ground truth |
 | `timings.json`, `run.log` | time per stage, the event log |
 | `stages/` | each stage's output; `sfm_run <config> --from reconstruction` re-runs only the later stages |
@@ -107,7 +116,10 @@ The other bunny configs: `bunny_sift.json` and `bunny_sift_tuned.json` (fewer / 
 ## CPU vs GPU
 
 `bench_stages <config>` runs a config on the CPU methods and on the CUDA methods and prints the time
-per stage. Ryzen 7 9700X (16 threads) against an RTX 5060 Ti; both give the same result on each:
+per stage (best of 3 after a warm-up run, so slightly below a single `sfm_run`). Ryzen 7 9700X (16
+threads) against an RTX 5060 Ti; both give the same result on each. The ETH3D rows use the default
+configs; the [project page](https://sovik-ghosh.github.io/sfm-cuda/) lists the tuned configs'
+accuracy (courtyard 0.030°, delivery_area 0.20°):
 
 | Config | Images | CPU | GPU | Speed-up | Result |
 |---|---|---|---|---|---|
@@ -126,28 +138,43 @@ fast choice there. The ETH3D and Middlebury data are not included.
 
 ## Use your own images
 
-1. **Images:** name them `0000.ppm`, `0001.ppm`, … in one folder, all the same size. To convert
-   JPEGs: `mogrify -format ppm *.jpg` (ImageMagick), then rename in order.
-2. **Intrinsics:** for each image `calib/0000.txt`, … with the 3×4 matrix `P = K [I | 0]`:
-   ```text
-   CONTOUR
-   fx 0  cx 0
-   0  fy cy 0
-   0  0  1  0
-   ```
-   (`fx`, `fy` = focal length in pixels; `cx`, `cy` = image centre). If you know the true camera
-   poses, use the full `P = K [R | t]`: `metrics.json` then reports the errors against them.
-3. **Config:** copy `configs/bunny_sift_tuned2.json` and change the `dataset` block:
+1. **Photos:** put them in one folder, e.g. `data/mine/images/`: JPEG or PNG, any file names (they
+   are taken in name order), all the same size, taken with one camera at one zoom setting.
+   Photos rotated only by an EXIF tag are read unrotated: the log warns about them.
+2. **Config:** copy `configs/bunny_sift_tuned2.json` and replace its `dataset` block:
    ```json
-   "dataset": { "root": "data/mine", "images_dir": "images", "calib_dir": "calib",
-                "masks_dir": "", "first": 0, "last": 99, "use_masks": false }
+   "dataset": { "root": "data/mine", "images_dir": "images", "masks_dir": "", "calib_dir": "",
+                "layout": "folder", "first": 0, "last": -1, "use_masks": false,
+                "camera": { "exif": true } }
    ```
-   and `run.name` (the output folder). For a video or a walk, use sequential pairs instead of all
-   pairs: `"pairs": { "mode": "sequential", "window": 10, "keyframe_stride": 10 }`. For many images
-   raise `memory.max_images` and `memory.arena_mb`.
-4. **Run:** `sfm_run configs/mine.json`, then `sfm_viewer outputs/<run name>`.
+   and `run.name` (the output folder). `"last": -1` takes every image. Raise `memory.max_images`
+   (64 in the bunny config) to at least the number of photos, and `memory.arena_mb` for many
+   images. For a video or a walk, use sequential pairs instead of all pairs:
+   `"pairs": { "mode": "sequential", "window": 10, "keyframe_stride": 10 }`.
+3. **Run** from the repository folder (a relative `root` is relative to the current folder):
+   `sfm_run configs/mine.json`, then `sfm_viewer outputs/<run name>`.
 
-Masks (optional) are `masks/0000.pgm`, …: black = object, everything else ignored.
+**The camera.** `"exif": true` reads the 35 mm-equivalent focal length from each JPEG's EXIF data
+(phones and most cameras write it); without it, add `"sensor_width_mm"` for your camera, or the
+focal length defaults to 1.2 × the longer image side. If you know the focal length in pixels, give
+it instead: `"camera": { "fx": 3000 }` (`fy`, `cx`, `cy` are optional; the centre is the image
+centre). The focal length is not refined during bundle adjustment, and lens distortion is not
+modelled: photos from a phone's main camera work; fisheye and strong wide-angle lenses do not.
+
+**Per-image calibration** (as for the bunny): leave out `camera` and give `calib_dir`, with a
+file per image named like it (`IMG_2041.txt` for `IMG_2041.JPG`) holding the 3×4 matrix
+`P = K [I | 0]`, or the full `P = K [R | t]` if you know the true poses (`metrics.json` then
+reports the errors against them):
+```text
+CONTOUR
+fx 0  cx 0
+0  fy cy 0
+0  0  1  0
+```
+
+**Masks** (optional): `masks_dir` with `IMG_2041.png` (or `.pgm`) per photo, `"use_masks": true`.
+Features are kept only on the object: black pixels by default (the bunny), or white ones with
+`"mask_object": "white"`.
 
 ## Viewer
 

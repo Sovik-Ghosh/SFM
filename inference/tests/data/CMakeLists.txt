@@ -1,6 +1,6 @@
 sfm_add_test(test_data
-  SOURCES test_image_io.cpp test_calib.cpp test_krt.cpp test_rig.cpp
-  LIBS sfm::data
+  SOURCES test_image_io.cpp test_calib.cpp test_krt.cpp test_rig.cpp test_image_list.cpp
+  LIBS sfm::data sfm::stb
   LABELS unit)
 if(TARGET test_data)  # skipped in CPU-only builds
   target_compile_definitions(test_data PRIVATE SFM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

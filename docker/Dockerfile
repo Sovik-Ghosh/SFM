@@ -11,7 +11,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends cmake ninja-bui
 
 WORKDIR /src
 COPY . .
+# The runtime stage has the CUDA libraries in /usr/local/cuda/lib64 (same path in both stages).
 RUN cmake --preset release -G Ninja -DSFM_BUILD_TESTS=OFF -DSFM_BUILD_VIEWER=OFF \
+      -DCMAKE_INSTALL_RPATH=/usr/local/cuda/lib64 \
     && cmake --build --preset release \
     && cmake --install build/release --prefix /opt/sfm
 

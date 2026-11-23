@@ -58,15 +58,30 @@ void validate_config(const Config& c, const fs::path& base_dir) {
   if (c.device.index < 0) p.add("device.index", "must be >= 0");
 
   const DatasetConfig& d = c.dataset;
+  const bool folder = d.layout == "folder";
+  if (d.layout != "numbered" && !folder) {
+    p.add("dataset.layout", "must be \"numbered\" or \"folder\"");
+  }
   if (d.first < 0) p.add("dataset.first", "must be >= 0");
-  if (d.last < d.first) p.add("dataset.last", "must be >= dataset.first");
+  if (folder && d.last != -1 && d.last < d.first) {
+    p.add("dataset.last", "must be >= dataset.first, or -1 for all images");
+  }
+  if (!folder && d.last < d.first) p.add("dataset.last", "must be >= dataset.first");
+  if (!folder && d.last > 9999) p.add("dataset.last", "must be <= 9999 (NNNN file names)");
+  const CameraConfig& k = d.camera;
+  if (k.fx < 0.0) p.add("dataset.camera.fx", "must be > 0");
+  if (k.fy < 0.0) p.add("dataset.camera.fy", "must be >= 0 (0: same as fx)");
+  if (k.fy > 0.0 && k.fx <= 0.0) p.add("dataset.camera.fx", "must be set when fy is");
+  if (k.exif && k.fx > 0.0) p.add("dataset.camera", "set either fx or exif, not both");
+  if (k.sensor_width_mm < 0.0) p.add("dataset.camera.sensor_width_mm", "must be >= 0");
+  if (k.fx_default_factor <= 0.0) p.add("dataset.camera.fx_default_factor", "must be > 0");
   if (d.root.empty()) {
     p.add("dataset.root", "must not be empty");
   } else {
     const fs::path root = d.root.is_absolute() ? d.root : base_dir / d.root;
     p.require_dir("dataset.root", root);
     p.require_dir("dataset.images_dir", root / d.images_dir);
-    p.require_dir("dataset.calib_dir", root / d.calib_dir);
+    if (!k.enabled()) p.require_dir("dataset.calib_dir", root / d.calib_dir);
     if (d.use_masks) {
       // An empty masks_dir would resolve to the dataset root and fail later at load time.
       if (d.masks_dir.empty()) {

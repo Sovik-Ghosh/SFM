@@ -1,13 +1,21 @@
 // COLMAP text format: https://colmap.github.io/format.html#text-format
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <vector>
 
 #include <Eigen/Geometry>
+#include <stb_image.h>
 
 #include "sfm/core/error.hpp"
 #include "sfm/export/export.hpp"
+
+// PNG writing for the scene export; static, so it cannot clash with another stb_image_write copy.
+#define STB_IMAGE_WRITE_STATIC
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
 
 namespace sfm::exporter {
 
@@ -24,7 +32,7 @@ std::ofstream open(const std::filesystem::path& file) {
 void write_colmap_text(const std::filesystem::path& dir, const recon::Reconstruction& rec,
                        const recon::TrackIndex& index,
                        const std::vector<features::Features>& features,
-                       const std::vector<std::string>& names,
+                       const std::vector<std::string>& names, int width, int height,
                        const std::vector<std::uint8_t>& gray) {
   std::filesystem::create_directories(dir);
   char buf[256];
@@ -32,15 +40,11 @@ void write_colmap_text(const std::filesystem::path& dir, const recon::Reconstruc
   auto cams = open(dir / "cameras.txt");
   cams << "# Camera list with one line of data per camera:\n"
           "#   CAMERA_ID, MODEL, WIDTH, HEIGHT, PARAMS[]\n";
-  // WIDTH / HEIGHT: the principal point is near the image centre on bunny; 2 cx x 2 cy is used
-  // only as size metadata.
   for (std::size_t i = 0; i < rec.cameras.size(); ++i) {
     const auto& c = rec.cameras[i];
     if (!c.registered) continue;
-    std::snprintf(buf, sizeof buf, "%zu PINHOLE %d %d %.12g %.12g %.12g %.12g\n", i + 1,
-                  static_cast<int>(std::lround(2 * c.K(0, 2))),
-                  static_cast<int>(std::lround(2 * c.K(1, 2))), c.K(0, 0), c.K(1, 1), c.K(0, 2),
-                  c.K(1, 2));
+    std::snprintf(buf, sizeof buf, "%zu PINHOLE %d %d %.12g %.12g %.12g %.12g\n", i + 1, width,
+                  height, c.K(0, 0), c.K(1, 1), c.K(0, 2) + 0.5, c.K(1, 2) + 0.5);
     cams << buf;
   }
 
@@ -81,8 +85,8 @@ void write_colmap_text(const std::filesystem::path& dir, const recon::Reconstruc
       const long id =
           (t >= 0 && rec.has_point[static_cast<std::size_t>(t)] != 0 && used_kp[i][k] != 0) ? t + 1L
                                                                                             : -1L;
-      std::snprintf(buf, sizeof buf, "%s%.6g %.6g %ld", k ? " " : "", f.xy[2 * k], f.xy[2 * k + 1],
-                    id);
+      std::snprintf(buf, sizeof buf, "%s%.8g %.8g %ld", k ? " " : "", f.xy[2 * k] + 0.5,
+                    f.xy[2 * k + 1] + 0.5, id);
       imgs << buf;
     }
     imgs << "\n";
@@ -110,6 +114,44 @@ void write_colmap_text(const std::filesystem::path& dir, const recon::Reconstruc
                   g, g, g, n ? err / n : 0.0);
     pts << buf << track << "\n";
   }
+}
+
+void write_colmap_scene(const std::filesystem::path& dir, const recon::Reconstruction& rec,
+                        const recon::TrackIndex& index,
+                        const std::vector<features::Features>& features,
+                        const std::vector<std::filesystem::path>& images, int width, int height,
+                        const std::vector<std::uint8_t>& gray) {
+  namespace fs = std::filesystem;
+  const fs::path out_images = dir / "images";
+  fs::create_directories(out_images);
+  std::vector<std::string> names;
+  names.reserve(images.size());
+  for (const fs::path& src : images) {
+    std::string ext = src.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (ext == ".jpg" || ext == ".jpeg" || ext == ".png") {
+      names.push_back(src.filename().string());
+      std::error_code ec;
+      fs::copy_file(src, out_images / names.back(), fs::copy_options::overwrite_existing, ec);
+      if (ec) throw IoError("write_colmap_scene: copy " + src.string() + ": " + ec.message());
+      continue;
+    }
+    names.push_back(src.stem().string() + ".png");  // PPM / PGM: few tools read them
+    int w = 0;
+    int h = 0;
+    int n = 0;
+    unsigned char* px = stbi_load(src.string().c_str(), &w, &h, &n, 0);
+    if (px == nullptr) {
+      throw IoError("write_colmap_scene: read " + src.string() + ": " + stbi_failure_reason());
+    }
+    const int stride = w * n;
+    const std::string out = (out_images / names.back()).string();
+    const int ok = stbi_write_png(out.c_str(), w, h, n, px, stride);
+    stbi_image_free(px);
+    if (ok == 0) throw IoError("write_colmap_scene: cannot write " + names.back());
+  }
+  write_colmap_text(dir / "sparse" / "0", rec, index, features, names, width, height, gray);
 }
 
 }  // namespace sfm::exporter

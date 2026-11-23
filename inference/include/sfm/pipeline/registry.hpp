@@ -50,7 +50,8 @@ class Registry {
 // present, not hidden by CUDA_VISIBLE_DEVICES), the CPU methods otherwise.
 struct Backend {
   bool gpu = false;
-  std::string device;  // name of CUDA device 0, empty without a GPU
+  std::string device;    // name of CUDA device 0, empty without a GPU
+  std::string unusable;  // why a visible GPU is not used (no code for its architecture), or empty
 };
 Backend detect_backend();
 

@@ -215,3 +215,40 @@ TEST(ConfigParse, ToJsonRoundTrips) {
   EXPECT_EQ(sfm::config::to_json(parse_config(text)), text);
   EXPECT_EQ(text.back(), '\n');
 }
+
+TEST(ConfigParse, OptionalDatasetAndOutputKeys) {
+  // Absent: the defaults (configs written before these keys existed still parse).
+  const auto d = parse_config(valid_json().dump());
+  EXPECT_EQ(d.dataset.layout, "numbered");
+  EXPECT_FALSE(d.dataset.mask_object_white);
+  EXPECT_FALSE(d.dataset.camera.enabled());
+  EXPECT_FALSE(d.output.colmap_scene);
+
+  json j = valid_json();
+  j["dataset"]["layout"] = "folder";
+  j["dataset"]["mask_object"] = "white";
+  j["dataset"]["camera"] = {{"fx", 1500}, {"cy", 400.5}};
+  j["output"]["colmap_scene"] = true;
+  const auto c = parse_config(j.dump());
+  EXPECT_EQ(c.dataset.layout, "folder");
+  EXPECT_TRUE(c.dataset.mask_object_white);
+  EXPECT_DOUBLE_EQ(c.dataset.camera.fx, 1500.0);
+  EXPECT_DOUBLE_EQ(c.dataset.camera.fy, 0.0);
+  EXPECT_DOUBLE_EQ(c.dataset.camera.cy, 400.5);
+  EXPECT_LT(c.dataset.camera.cx, 0.0);
+  EXPECT_TRUE(c.output.colmap_scene);
+  // to_json keeps them, so a run's config.json reproduces the run.
+  const auto again = parse_config(sfm::config::to_json(c));
+  EXPECT_EQ(again.dataset.layout, "folder");
+  EXPECT_TRUE(again.dataset.mask_object_white);
+  EXPECT_DOUBLE_EQ(again.dataset.camera.fx, 1500.0);
+  EXPECT_TRUE(again.output.colmap_scene);
+
+  j["dataset"]["mask_object"] = "grey";
+  expect_error(j, "dataset.mask_object: expected \"black\" or \"white\"");
+  j = valid_json();
+  j["dataset"]["camera"] = {{"focal", 1500}};
+  expect_error(j, "dataset.camera.focal: unknown key");
+  j["dataset"]["camera"] = {{"exif", "yes"}};
+  expect_error(j, "dataset.camera.exif: expected boolean");
+}

@@ -26,16 +26,45 @@ struct DeviceConfig {
   int index = 0;  // CUDA device ordinal; checked against the device count at startup, not here
 };
 
+// One pinhole camera for every image, instead of a calibration file per image (optional
+// "dataset.camera"). fx/fy in pixels; cx/cy default to the image centre ((w - 1) / 2, (h - 1) / 2).
+// exif: fx = fy from each JPEG's EXIF 35 mm-equivalent focal length (or its focal length in mm and
+// sensor_width_mm); images without it use fx_default_factor * max(width, height).
+// fx = 0: unset; fy = 0: same as fx; cx, cy < 0: the image centre. sensor_width_mm is used with
+// exif when a file has no 35 mm-equivalent focal length; fx_default_factor (COLMAP's default)
+// when nothing else is known.
+struct CameraConfig {
+  double fx = 0.0;
+  double fy = 0.0;
+  double cx = -1.0;
+  double cy = -1.0;
+  bool exif = false;
+  double sensor_width_mm = 0.0;
+  double fx_default_factor = 1.2;
+
+  bool enabled() const { return fx > 0.0 || exif; }
+};
+
 struct DatasetConfig {
   std::filesystem::path root;
   std::filesystem::path images_dir;  // relative to root
   std::filesystem::path masks_dir;   // relative to root; ignored when use_masks is false
-  std::filesystem::path calib_dir;   // relative to root
-  int first = 0;                     // inclusive image id range
-  int last = 0;
+  std::filesystem::path calib_dir;   // relative to root; ignored when camera.enabled()
+  int first = 0;                     // inclusive image range (ids, or indices in "folder" layout)
+  int last = 0;                      // "folder" layout: -1 = up to the last image
   bool use_masks = true;
+  // Optional keys (absent from older configs):
+  // "numbered": <images_dir>/NNNN.ppm, <masks_dir>/NNNN.pgm, <calib_dir>/NNNN.txt for ids
+  //   first..last (the bunny layout).
+  // "folder": every .jpg/.jpeg/.png/.ppm/.pgm in images_dir (any case), sorted by file name;
+  //   first..last index that list. The mask of photo.jpg is <masks_dir>/photo.png or .pgm, its
+  //   calibration <calib_dir>/photo.txt.
+  std::string layout = "numbered";
+  bool mask_object_white = false;  // "mask_object": "black" (default) or "white"
+  CameraConfig camera;
 
-  int image_count() const { return last - first + 1; }
+  // Image count for a fixed range; -1 when it depends on the folder ("folder" with last = -1).
+  int image_count() const { return last < 0 ? -1 : last - first + 1; }
 };
 
 struct MemoryConfig {
@@ -142,6 +171,9 @@ struct OutputConfig {
   bool dump_stages = true;  // .npy of every stage output under <run>/stages/
   bool ply = true;
   bool colmap = true;
+  // Optional "colmap_scene": also write <run>/scene/{images,sparse/0}, the folder layout Gaussian
+  // splatting and NeRF tools (3DGS, nerfstudio, gsplat) open directly.
+  bool colmap_scene = false;
 };
 
 struct Config {

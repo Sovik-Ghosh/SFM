@@ -9,6 +9,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNM
 #define STBI_ONLY_PNG
+#define STBI_ONLY_JPEG
 #define STBI_FAILURE_USERMSG
 #include <stb_image.h>
 
@@ -52,12 +53,16 @@ Image8 load_gray(const std::filesystem::path& path) {
   return img;
 }
 
-Image8 load_mask(const std::filesystem::path& path) {
+Image8 load_mask(const std::filesystem::path& path, bool object_white) {
   Image8 img;
   const StbiPixels px = load(path, 1, img.width, img.height);
   const std::size_t n = static_cast<std::size_t>(img.width) * static_cast<std::size_t>(img.height);
   img.pixels.resize(n);
-  for (std::size_t i = 0; i < n; ++i) img.pixels[i] = px.get()[i] == 0 ? 255 : 0;
+  if (object_white) {  // usual convention: object > 127, background dark
+    for (std::size_t i = 0; i < n; ++i) img.pixels[i] = px.get()[i] > 127 ? 255 : 0;
+  } else {
+    for (std::size_t i = 0; i < n; ++i) img.pixels[i] = px.get()[i] == 0 ? 255 : 0;
+  }
   return img;
 }
 
