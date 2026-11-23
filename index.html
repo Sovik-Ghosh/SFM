@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Epipole: GPU Structure-from-Motion in C++ and CUDA (CPU or GPU)</title>
-<meta name="description" content="Epipole: open-source Structure-from-Motion (SfM) and photogrammetry in C++17 and CUDA: 3D reconstruction from photos with camera poses and a sparse point cloud, on an NVIDIA GPU or the CPU. Same results on both; 0.17° on the bunny dataset in 0.8 s.">
+<meta name="description" content="Epipole: open-source Structure-from-Motion (SfM) and photogrammetry in C++17 and CUDA: 3D reconstruction from photos with camera poses and a sparse point cloud, on an NVIDIA GPU or the CPU. Same results on both; 0.17° on the bunny dataset in 0.9 s.">
 <link rel="canonical" href="https://sovik-ghosh.github.io/sfm-cuda/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Epipole: GPU Structure-from-Motion in C++ and CUDA">
@@ -24,7 +24,7 @@
   "codeRepository": "https://github.com/Sovik-Ghosh/sfm-cuda",
   "programmingLanguage": ["C++", "CUDA"],
   "license": "https://www.apache.org/licenses/LICENSE-2.0",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "keywords": "structure from motion, SfM, photogrammetry, 3D reconstruction, CUDA, GPU, bundle adjustment, SIFT, COLMAP alternative",
   "author": {"@type": "Person", "name": "Sovik Ghosh"}
 }
@@ -64,10 +64,10 @@ footer { border-top: 1px solid var(--line); margin-top: 64px; padding-top: 20px;
   <h1>Epipole</h1>
   <p class="lead">Epipole is GPU Structure-from-Motion in C++17 and CUDA: 3D reconstruction from photos, with camera
   poses and a sparse point cloud, on an NVIDIA GPU or the CPU. Every stage has both versions, and they
-  give the same results.</p>
+  give the same results. No OpenCV, no Ceres.</p>
   <div class="buttons">
     <a class="primary" href="https://github.com/Sovik-Ghosh/sfm-cuda">Code on GitHub</a>
-    <a href="https://github.com/Sovik-Ghosh/sfm-cuda/releases/latest">Download v1.1.0</a>
+    <a href="https://github.com/Sovik-Ghosh/sfm-cuda/releases/latest">Download v1.2.0</a>
     <a href="https://github.com/Sovik-Ghosh/sfm-cuda/discussions">Discussions</a>
   </div>
 </header>
@@ -105,7 +105,7 @@ with every stage in CUDA:</p>
   <tr><td>Middlebury templeRing</td><td class="num">47</td><td class="num">47</td><td class="num">0.13°</td><td class="num">0.18°</td></tr>
   <tr><td>ETH3D delivery_area, four-camera rig</td><td class="num">948</td><td class="num">948</td><td class="num">0.09°</td><td class="num">–</td></tr>
 </table>
-<p class="note">Errors against each dataset's ground truth. ETH3D and Middlebury data are not included in the repository.</p>
+<p class="note">Errors against each dataset's ground truth, with each dataset's tuned config. ETH3D and Middlebury data are not included in the repository.</p>
 
 <h2>CPU or GPU</h2>
 <table>
@@ -116,19 +116,21 @@ with every stage in CUDA:</p>
   <tr><td>ETH3D courtyard (1550×1032)</td><td class="num">38</td><td class="num">292 s</td><td class="num">4.1 s</td><td class="num">71×</td></tr>
   <tr><td>ETH3D delivery_area, one camera</td><td class="num">237</td><td class="num">105 s</td><td class="num">6.5 s</td><td class="num">16×</td></tr>
 </table>
-<p class="note">Ryzen 7 9700X (16 threads) against an RTX 5060 Ti; both give the same result on each. Measured with <code>bench_stages</code>.</p>
+<p class="note">Ryzen 7 9700X (16 threads) against an RTX 5060 Ti; both give the same result on each. Measured with <code>bench_stages</code> (best of 3 after a warm-up; a single <code>sfm_run</code> of the bunny takes 0.9 s), default configs.</p>
 
 <h2>Get started</h2>
-<pre>git clone https://github.com/Sovik-Ghosh/sfm-cuda.git
+<pre>git clone --depth 1 https://github.com/Sovik-Ghosh/sfm-cuda.git
 cd sfm-cuda
-cmake --preset release &amp;&amp; cmake --build --preset release -j    # with CUDA 13
+cmake --preset release &amp;&amp; cmake --build --preset release -j    # CUDA 13, RTX 20xx to 50xx
 # or, without an NVIDIA GPU:  cmake --preset cpu &amp;&amp; cmake --build --preset cpu -j
 ./build/release/inference/apps/sfm_run configs/bunny_sift_tuned2.json
 ./build/release/inference/apps/sfm_viewer outputs/bunny-sift-tuned2</pre>
-<p>A prebuilt CPU-only Linux binary is attached to the
-<a href="https://github.com/Sovik-Ghosh/sfm-cuda/releases/latest">latest release</a>. To reconstruct your own
-photos, see <a href="https://github.com/Sovik-Ghosh/sfm-cuda#use-your-own-images">Use your own images</a>
-in the README.</p>
+<p>Prebuilt Linux binaries (CPU-only and CUDA) are attached to the
+<a href="https://github.com/Sovik-Ghosh/sfm-cuda/releases/latest">latest release</a>. Your own photos:
+a folder of JPEGs, the focal length from their EXIF data, no renaming; see
+<a href="https://github.com/Sovik-Ghosh/sfm-cuda#use-your-own-images">Use your own images</a>.
+<code>"colmap_scene": true</code> writes the <code>images/</code> + <code>sparse/0</code> folder that
+3D Gaussian Splatting and nerfstudio open directly.</p>
 
 <div class="gallery">
   <figure style="margin:0">
@@ -142,7 +144,7 @@ in the README.</p>
 </div>
 
 <footer>
-  Epipole 1.1.0 · Apache 2.0 · <a href="https://github.com/Sovik-Ghosh/sfm-cuda">github.com/Sovik-Ghosh/sfm-cuda</a>
+  Epipole 1.2.0 · Apache 2.0 · <a href="https://github.com/Sovik-Ghosh/sfm-cuda">github.com/Sovik-Ghosh/sfm-cuda</a>
   · Fonts: Gelasio, IBM Plex (SIL Open Font License)
 </footer>
 </main>
