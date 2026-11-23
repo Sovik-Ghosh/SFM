@@ -30,9 +30,13 @@ Use it for photogrammetry, multi-view geometry experiments, or as a C++/CUDA lib
   bundle adjustment (Levenberg–Marquardt with a Schur complement, in CUDA).
 - **Rigid camera rigs:** several cameras fixed to each other are solved as one rig.
 - **Viewer:** watch a reconstruction run live, replay it, inspect cameras, compare two runs.
+- **Python:** `epipole.reconstruct("photos/")` returns poses and a coloured point cloud as NumPy
+  arrays.
+- **Cameras:** focal length from EXIF (and refined), known or estimated radial lens distortion.
 
 On the included bunny dataset (36 views) the whole pipeline takes **0.9 s** on an RTX 5060 Ti and
-reaches **0.17°** median rotation error, against COLMAP's 0.28°. On ETH3D scenes of ~1000 images
+reaches **0.17°** median rotation error; COLMAP 4.2.1 built with CUDA takes 2.5 s and reaches 0.28°
+on the same input. On ETH3D scenes of ~1000 images
 from a four-camera rig it registers every image at 0.09°–0.36° in 1–5 minutes.
 
 ## Requirements
@@ -47,7 +51,7 @@ from a four-camera rig it registers every image at 0.09°–0.36° in 1–5 minu
 No OpenCV, no Ceres: the only dependencies are CUDA (optional) and the header-only libraries in
 [`third_party/`](third_party/) (Eigen, nlohmann/json, stb, Dear ImGui), plus GLFW for the viewer.
 
-Every stage has a CPU and a CUDA version, and both give the same results; the GPU is 4–70× faster
+Every stage has a CPU and a CUDA version, and both give the same results; the GPU is 2–60× faster
 ([benchmark](#cpu-vs-gpu)). The default build runs on RTX 20xx to 50xx (`sm_75`, `86`, `89`,
 `120`); tested on an RTX 5060 Ti. A GPU outside that list runs on the CPU, and the run log says so
 and names the flag to add (`-DCMAKE_CUDA_ARCHITECTURES=<arch>`, e.g. `90` for an H100).
@@ -97,7 +101,7 @@ A run writes `outputs/<run name>/`:
 | File | Contents |
 |---|---|
 | `model.ply` | the point cloud (MeshLab, CloudCompare, Blender) |
-| `colmap/` | cameras, images and points in COLMAP's text format |
+| `colmap/` | cameras, images and points (with their colours) in COLMAP's text and binary formats |
 | `scene/` | with `"output": {"colmap_scene": true}`: `images/` + `sparse/0/`, the folder 3D Gaussian Splatting, nerfstudio and gsplat open as it is |
 | `metrics.json` | registered images, points, reprojection error, errors against the ground truth |
 | `timings.json`, `run.log` | time per stage, the event log |
@@ -111,7 +115,7 @@ The other bunny configs: `bunny_sift.json` and `bunny_sift_tuned.json` (fewer / 
 | `bunny_sift_tuned2.json` | 36 / 36 | 5960 | **0.17° / 0.53°** | 0.9 s |
 | `bunny_sift.json` | 36 / 36 | 3736 | 0.26° / 0.58° | 0.8 s |
 | `bunny_gpu.json` (ORB) | 35 / 36 | 6805 | 0.55° / 4.5° | 0.8 s |
-| COLMAP 4.2 (same masks and intrinsics) | 36 / 36 | | 0.28° / 0.64° | |
+| COLMAP 4.2.1, CUDA build (same masks and intrinsics) | 36 / 36 | 2346 | 0.28° / 0.59° | 2.5 s |
 
 ## CPU vs GPU
 
@@ -123,14 +127,26 @@ accuracy (courtyard 0.030°, delivery_area 0.20°):
 
 | Config | Images | CPU | GPU | Speed-up | Result |
 |---|---|---|---|---|---|
-| `bunny.json` (ORB) | 36 | 2.3 s | 0.62 s | 3.8× | 35 / 36, 0.55° |
-| `bunny_sift_tuned2.json` (SIFT) | 36 | 26 s | 0.79 s | 33× | 36 / 36, 0.17° |
-| Middlebury templeRing | 47 | 48 s | 3.4 s | 14× | 47 / 47, 0.13° |
-| ETH3D courtyard (1550×1032) | 38 | 292 s | 4.1 s | 71× | 38 / 38, 0.034° |
-| ETH3D delivery_area, one camera | 237 | 105 s | 6.5 s | 16× | 237 / 237, 0.27° |
+| `bunny.json` (ORB) | 36 | 1.3 s | 0.62 s | 2.1× | 35 / 36, 0.55° |
+| `bunny_sift_tuned2.json` (SIFT) | 36 | 8.3 s | 0.79 s | 10× | 36 / 36, 0.17° |
+| Middlebury templeRing | 47 | 34 s | 3.4 s | 10× | 47 / 47, 0.13° |
+| ETH3D courtyard (1550×1032) | 38 | 245 s | 4.1 s | 60× | 38 / 38, 0.034° |
+| ETH3D delivery_area, one camera | 237 | 41 s | 6.5 s | 6× | 237 / 237, 0.27° |
 
-On the CPU most of the time is SIFT (about 0.6–1.5 s per image) and matching; ORB configs are the
-fast choice there. The ETH3D and Middlebury data are not included.
+On the CPU most of the time is exact SIFT matching (all pairs); ORB configs are the fast choice
+there. The ETH3D and Middlebury data are not included.
+
+**Against COLMAP** (4.2.1 built with CUDA, bunny, same masks and fixed intrinsics, best of 3):
+
+| | Features | Matching | Reconstruction | Total | Rotation error (median) |
+|---|---|---|---|---|---|
+| Epipole, GPU | 0.45 s | 0.11 s | 0.17 s | **0.77 s** | **0.17°** |
+| COLMAP, GPU (SIFT, matching and BA) | 0.94 s | 0.31 s | 1.25 s | 2.5 s | 0.28° |
+| COLMAP, CPU | 1.6 s | 1.2 s | 1.2 s | 4.0 s | 0.29° |
+| Epipole, CPU | 3.3 s | 4.5 s | 0.48 s | 8.3 s | 0.17° |
+
+COLMAP's times are its three command-line steps (feature extraction, matching, mapping), each a
+separate process; Epipole's are `bench_stages` in one process (a single `sfm_run` takes 0.9 s).
 
 ```bash
 ./build/release/inference/apps/bench_stages configs/bunny_sift_tuned2.json
@@ -158,8 +174,14 @@ fast choice there. The ETH3D and Middlebury data are not included.
 (phones and most cameras write it); without it, add `"sensor_width_mm"` for your camera, or the
 focal length defaults to 1.2 × the longer image side. If you know the focal length in pixels, give
 it instead: `"camera": { "fx": 3000 }` (`fy`, `cx`, `cy` are optional; the centre is the image
-centre). The focal length is not refined during bundle adjustment, and lens distortion is not
-modelled: photos from a phone's main camera work; fisheye and strong wide-angle lenses do not.
+centre). With an estimated focal length, add `"refine_focal": true` to the `ba` block: it searches
+the focal length that fits the photos best (bunny with a 5 % wrong focal length: 0.35° → 0.18°).
+
+**Lens distortion.** If you know your lens's radial distortion, give it in COLMAP's `OPENCV`
+convention: `"distortion": { "k1": -0.1, "k2": 0.0 }` in the `dataset` block. Otherwise
+`"refine_distortion": true` in the `ba` block estimates k1 (it needs features across the whole
+frame, not only on an object in the centre, and re-runs the reconstruction once or twice). Fisheye
+lenses are not supported.
 
 **Per-image calibration** (as for the bunny): leave out `camera` and give `calib_dir`, with a
 file per image named like it (`IMG_2041.txt` for `IMG_2041.JPG`) holding the 3×4 matrix
@@ -175,6 +197,26 @@ fx 0  cx 0
 **Masks** (optional): `masks_dir` with `IMG_2041.png` (or `.pgm`) per photo, `"use_masks": true`.
 Features are kept only on the object: black pixels by default (the bunny), or white ones with
 `"mask_object": "white"`.
+
+## Python
+
+```bash
+pip install .                        # CPU only; SFM_WITH_CUDA=ON pip install . builds the CUDA stages
+```
+
+```python
+import epipole
+r = epipole.reconstruct("data/mine/images")          # focal length from EXIF, refined
+print(r.metrics["registered"], r.points.shape)       # (M, 3) points, r.colors (M, 3) uint8
+r.R, r.t, r.K, r.registered                          # per image: x_camera = R x_world + t
+r.run_dir                                            # model.ply, colmap/, scene/ (3DGS / nerfstudio)
+
+r = epipole.run("configs/bunny_sift_tuned2.json")    # any config: a path or a dict
+```
+
+`reconstruct()` takes the same options as a config (`camera=`, `masks=`, `distortion=`,
+`refine_distortion=`, `sequential=` for videos). Errors raise `epipole.ConfigError` (a
+`ValueError`) or `epipole.IoError` (an `OSError`).
 
 ## Viewer
 

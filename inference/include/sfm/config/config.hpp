@@ -62,6 +62,11 @@ struct DatasetConfig {
   std::string layout = "numbered";
   bool mask_object_white = false;  // "mask_object": "black" (default) or "white"
   CameraConfig camera;
+  // Optional "distortion": {"k1", "k2"}: known radial lens distortion of every image (COLMAP's
+  // OPENCV model without tangential terms; normalised coordinates). Keypoints are undistorted
+  // after detection; 0, 0 = none.
+  double k1 = 0.0;
+  double k2 = 0.0;
 
   // Image count for a fixed range; -1 when it depends on the folder ("folder" with last = -1).
   int image_count() const { return last < 0 ? -1 : last - first + 1; }
@@ -165,6 +170,14 @@ struct BaConfig {
   // none. courtyard: median rotation 0.050 -> 0.035 deg (COLMAP 0.034).
   double final_huber_px = 0.5;
   std::uint32_t final_max_iters = 10;
+  // Optional "refine_focal": after the final BA, search one scale factor s for every camera's
+  // focal length (fx, fy -> s fx, s fy; s in [0.74, 1.35]) that minimises the final BA cost, for
+  // photos whose focal length is only estimated (dataset.camera exif). Needs final_max_iters > 0.
+  bool refine_focal = false;
+  // Optional "refine_distortion": after the final BA (and refine_focal), search the radial
+  // distortion k1 in [-0.4, 0.4] that minimises the reprojection error in the recorded pixels
+  // (each candidate re-undistorts the keypoints and re-runs the final BA). k2 stays as configured.
+  bool refine_distortion = false;
 };
 
 struct OutputConfig {

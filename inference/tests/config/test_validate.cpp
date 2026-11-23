@@ -225,3 +225,30 @@ TEST_F(ConfigValidate, FolderLayoutAndSharedCamera) {
   j["dataset"]["camera"] = {{"fy", 1000}};
   EXPECT_NE(problems(j).find("dataset.camera.fx: must be set when fy is"), std::string::npos);
 }
+
+TEST_F(ConfigValidate, RefineFocalNeedsTheFinalBa) {
+  json j = valid_json();
+  j["ba"]["refine_focal"] = true;
+  EXPECT_EQ(problems(j), "");
+  EXPECT_TRUE(parsed(j).ba.refine_focal);
+  j["ba"]["final_max_iters"] = 0;
+  EXPECT_NE(problems(j).find("ba.refine_focal: needs the final BA"), std::string::npos);
+}
+
+TEST_F(ConfigValidate, DistortionKeys) {
+  json j = valid_json();
+  j["dataset"]["distortion"] = {{"k1", -0.1}, {"k2", 0.01}};
+  j["ba"]["refine_distortion"] = true;
+  EXPECT_EQ(problems(j), "");
+  const auto c = parsed(j);
+  EXPECT_DOUBLE_EQ(c.dataset.k1, -0.1);
+  EXPECT_DOUBLE_EQ(c.dataset.k2, 0.01);
+  EXPECT_TRUE(c.ba.refine_distortion);
+  const auto again = parse_config(sfm::config::to_json(c));  // config.json keeps them
+  EXPECT_DOUBLE_EQ(again.dataset.k1, -0.1);
+  EXPECT_TRUE(again.ba.refine_distortion);
+  j["dataset"]["distortion"]["k1"] = 1.5;
+  EXPECT_NE(problems(j).find("dataset.distortion.k1: must be in (-1, 1)"), std::string::npos);
+  j["dataset"]["distortion"] = {{"p1", 0.0}};
+  EXPECT_THROW(parsed(j), sfm::ConfigError);  // unknown key
+}

@@ -114,6 +114,7 @@ endif()
 
 # Reconstruction stage (CPU): two-view geometry, triangulation, PnP, incremental loop.
 add_library(sfm_recon
+  src/recon/distortion.cpp
   src/recon/geometry.cpp
   src/recon/incremental.cpp
   src/recon/init_pair.cpp

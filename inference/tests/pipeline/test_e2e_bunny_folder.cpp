@@ -13,7 +13,11 @@
 
 #include "sfm/config/config.hpp"
 #include "sfm/core/logger.hpp"
+#include "sfm/data/calib.hpp"
+#include "sfm/data/image_io.hpp"
+#include "sfm/data/krt.hpp"
 #include "sfm/pipeline/pipeline.hpp"
+#include "sfm/recon/distortion.hpp"
 
 #define STB_IMAGE_WRITE_STATIC
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -97,5 +101,125 @@ TEST(E2eBunnyFolder, RenamedPngsGiveTheNumberedResult) {
   // The plain colmap/ export names the source files.
   EXPECT_NE(read_file(folder.run_dir / "colmap/images.txt").find(" aa_IMG.png\n"),
             std::string::npos);
+  fs::remove_all(work);
+}
+
+// ba.refine_focal: the bunny with every focal length 5 % too short. Without refinement the
+// median rotation error doubles (0.17 -> 0.35 deg); the focal search recovers fx to ~0.2 % and the
+// error to ~0.18 deg.
+TEST(E2eBunnyFolder, RefineFocalRecoversAWrongFocalLength) {
+  const fs::path src(SFM_SOURCE_DIR);
+  const fs::path work = fs::temp_directory_path() / "sfm_e2e_bunny_focal";
+  fs::remove_all(work);
+  fs::create_directories(work / "calib");
+  for (int i = 0; i < 36; ++i) {
+    char id[16];
+    std::snprintf(id, sizeof id, "%04d.txt", i);
+    const auto P0 = sfm::data::read_projection(src / "data/bunny/calib" / id);
+    auto krt = sfm::data::decompose_projection(P0);
+    krt.K(0, 0) *= 0.95;
+    krt.K(1, 1) *= 0.95;
+    krt.K(0, 1) *= 0.95;
+    const sfm::data::Mat34 P = sfm::data::compose_projection(krt);
+    std::ofstream out(work / "calib" / id);
+    out.precision(17);
+    out << "CONTOUR\n";
+    for (int r = 0; r < 3; ++r) {
+      out << P(r, 0) << " " << P(r, 1) << " " << P(r, 2) << " " << P(r, 3) << "\n";
+    }
+  }
+  auto cfg = sfm::config::load_config(src / "configs" / "bunny_sift_tuned2.json", src);
+  cfg.dataset.calib_dir = work / "calib";  // absolute: replaces root / calib_dir
+  cfg.run.output_dir = work / "out";
+  cfg.output.dump_stages = false;
+  cfg.output.ply = false;
+  cfg.output.colmap = false;
+  std::ostringstream log_text;
+  sfm::core::Logger log(sfm::core::LogLevel::kInfo, &log_text, false);
+  const auto wrong = sfm::pipeline::run_pipeline(cfg, {}, log);
+  cfg.ba.refine_focal = true;
+  cfg.run.name = "refined";
+  const auto refined = sfm::pipeline::run_pipeline(cfg, {}, log);
+  if (!wrong.metrics || !refined.metrics) {
+    GTEST_FAIL() << "no metrics";
+  }
+  const auto& mw = *wrong.metrics;
+  const auto& mr = *refined.metrics;
+  EXPECT_GT(mw.rotation_median_deg, 0.3);
+  EXPECT_LT(mr.rotation_median_deg, 0.2);
+  EXPECT_EQ(mr.registered_ids.size(), 36u);
+  const std::string text = log_text.str();
+  const auto at = text.find("event=recon.focal_refined scale=");
+  ASSERT_NE(at, std::string::npos);
+  const double scale = std::stod(text.substr(at + 32));
+  EXPECT_NEAR(scale, 1.0 / 0.95, 0.01) << text.substr(at, 120);
+  fs::remove_all(work);
+}
+
+// dataset.distortion: the bunny recorded through a barrel lens (k1 = -0.15, each view warped with
+// its true K). Ignoring the distortion costs accuracy (0.27 deg median); with the known k1 the
+// result is that of the undistorted images (0.17-0.18 deg). The COLMAP camera is OPENCV.
+TEST(E2eBunnyFolder, KnownDistortionIsUndone) {
+  const fs::path src(SFM_SOURCE_DIR);
+  const fs::path work = fs::temp_directory_path() / "sfm_e2e_bunny_distortion";
+  fs::remove_all(work);
+  for (const char* d : {"images", "silhouettes"}) fs::create_directories(work / d);
+  const sfm::recon::Radial lens{-0.15, 0.0};
+  for (int i = 0; i < 36; ++i) {
+    char id[8];
+    std::snprintf(id, sizeof id, "%04d", i);
+    const std::string n(id);
+    const fs::path bunny = src / "data/bunny";
+    const auto P = sfm::data::read_projection(bunny / "calib" / (n + ".txt"));
+    const Eigen::Matrix3d K = sfm::data::decompose_projection(P).K;
+    const auto rgb = sfm::data::load_rgb(bunny / "images" / (n + ".ppm"));
+    const auto sil = sfm::data::load_gray(bunny / "silhouettes" / (n + ".pgm"));
+    const int w = rgb.width;
+    const int h = rgb.height;
+    std::vector<unsigned char> out(rgb.rgb.size(), 0);
+    std::vector<unsigned char> mask(sil.pixels.size(), 255);
+    for (int y = 0; y < h; ++y) {
+      for (int x = 0; x < w; ++x) {
+        // Recorded pixel (x, y) shows the ideal pixel undistort(x, y): nearest sample.
+        const Eigen::Vector2d s = sfm::recon::undistort(K, lens, Eigen::Vector2d(x, y));
+        const int sx = static_cast<int>(std::lround(s.x()));
+        const int sy = static_cast<int>(std::lround(s.y()));
+        if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue;
+        const std::size_t to = static_cast<std::size_t>(y) * w + x;
+        const std::size_t from = static_cast<std::size_t>(sy) * w + sx;
+        for (int c = 0; c < 3; ++c) out[3 * to + c] = rgb.rgb[3 * from + c];
+        mask[to] = sil.pixels[from];
+      }
+    }
+    const std::string size = std::to_string(w) + " " + std::to_string(h);
+    std::ofstream img(work / "images" / (n + ".ppm"), std::ios::binary);
+    img << "P6\n" << size << "\n255\n" << std::string(out.begin(), out.end());
+    std::ofstream msk(work / "silhouettes" / (n + ".pgm"), std::ios::binary);
+    msk << "P5\n" << size << "\n255\n" << std::string(mask.begin(), mask.end());
+  }
+  auto cfg = sfm::config::load_config(src / "configs" / "bunny_sift_tuned2.json", src);
+  cfg.dataset.root = work;
+  cfg.dataset.calib_dir = src / "data/bunny/calib";
+  cfg.run.output_dir = work / "out";
+  cfg.output.dump_stages = false;
+  cfg.output.ply = false;
+  std::ostringstream log_text;
+  sfm::core::Logger log(sfm::core::LogLevel::kWarn, &log_text, false);
+  cfg.run.name = "ignored";
+  const auto ignored = sfm::pipeline::run_pipeline(cfg, {}, log);
+  cfg.run.name = "known";
+  cfg.dataset.k1 = lens.k1;
+  const auto known = sfm::pipeline::run_pipeline(cfg, {}, log);
+  if (!ignored.metrics || !known.metrics || !known.model) {
+    GTEST_FAIL() << "no metrics";
+  }
+  EXPECT_GT(ignored.metrics->rotation_median_deg, 0.24);
+  EXPECT_LT(known.metrics->rotation_median_deg, 0.2);
+  EXPECT_EQ(known.metrics->registered_ids.size(), 36u);
+  EXPECT_DOUBLE_EQ(known.model->k1, -0.15);
+  std::ifstream cams(known.run_dir / "colmap" / "cameras.txt");
+  std::stringstream text;
+  text << cams.rdbuf();
+  EXPECT_NE(text.str().find(" OPENCV 1024 768 "), std::string::npos);
   fs::remove_all(work);
 }

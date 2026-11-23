@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(SFM
-  VERSION 1.2.0
+  VERSION 1.3.1
   DESCRIPTION "Incremental Structure-from-Motion, C++/CUDA runtime"
   LANGUAGES CXX)
 
@@ -11,6 +11,10 @@ option(SFM_WITH_CUDA "Build the CUDA stages (needs the CUDA toolkit)" ON)
 option(SFM_WERROR "Treat warnings in project code as errors" OFF)
 option(SFM_BUILD_TESTS "Build unit tests" ON)
 option(SFM_BUILD_VIEWER "Build apps/sfm_viewer (needs GLFW 3 and OpenGL dev packages)" ON)
+option(SFM_BUILD_PYTHON "Build the Python module epipole (pybind11; pyproject.toml turns it on)" OFF)
+if(SFM_BUILD_PYTHON)
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)  # the static libraries go into a shared module
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -51,3 +55,6 @@ if(SFM_BUILD_TESTS)
 endif()
 
 add_subdirectory(inference)
+if(SFM_BUILD_PYTHON)
+  add_subdirectory(python)
+endif()

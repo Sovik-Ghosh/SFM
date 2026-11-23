@@ -1,6 +1,7 @@
 // Semantic checks on a parsed Config. Collects every problem so one run reports them all.
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <string>
 #include <system_error>
@@ -186,6 +187,14 @@ void validate_config(const Config& c, const fs::path& base_dir) {
     p.add("ba.global_growth", "must be in (0, 10]");
   }
   if (!(c.ba.final_huber_px > 0.0)) p.add("ba.final_huber_px", "must be > 0");
+  if (c.ba.refine_focal && c.ba.final_max_iters == 0) {
+    p.add("ba.refine_focal", "needs the final BA (ba.final_max_iters > 0)");
+  }
+  if (c.ba.refine_distortion && c.ba.final_max_iters == 0) {
+    p.add("ba.refine_distortion", "needs the final BA (ba.final_max_iters > 0)");
+  }
+  if (!(std::abs(c.dataset.k1) < 1.0)) p.add("dataset.distortion.k1", "must be in (-1, 1)");
+  if (!(std::abs(c.dataset.k2) < 1.0)) p.add("dataset.distortion.k2", "must be in (-1, 1)");
 
   p.throw_if_any();
 }

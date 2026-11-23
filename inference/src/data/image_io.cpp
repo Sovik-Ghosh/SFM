@@ -53,6 +53,14 @@ Image8 load_gray(const std::filesystem::path& path) {
   return img;
 }
 
+ImageRgb load_rgb(const std::filesystem::path& path) {
+  ImageRgb img;
+  const StbiPixels px = load(path, 3, img.width, img.height);
+  const std::size_t n = static_cast<std::size_t>(img.width) * static_cast<std::size_t>(img.height);
+  img.rgb.assign(px.get(), px.get() + 3 * n);
+  return img;
+}
+
 Image8 load_mask(const std::filesystem::path& path, bool object_white) {
   Image8 img;
   const StbiPixels px = load(path, 1, img.width, img.height);

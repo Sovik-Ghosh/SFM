@@ -170,6 +170,12 @@ Config parse_config(std::string_view json_text) {
     if (cam.has("fx_default_factor")) k.fx_default_factor = cam.number("fx_default_factor");
     cam.finish();
   }
+  if (ds.has("distortion")) {
+    Section dist = ds.object("distortion");
+    if (dist.has("k1")) c.dataset.k1 = dist.number("k1");
+    if (dist.has("k2")) c.dataset.k2 = dist.number("k2");
+    dist.finish();
+  }
   ds.finish();
 
   Section mem = top.object("memory");
@@ -240,6 +246,8 @@ Config parse_config(std::string_view json_text) {
   c.ba.global_growth = ba.number("global_growth");
   c.ba.final_huber_px = ba.number("final_huber_px");
   c.ba.final_max_iters = ba.integer<std::uint32_t>("final_max_iters");
+  if (ba.has("refine_focal")) c.ba.refine_focal = ba.boolean("refine_focal");
+  if (ba.has("refine_distortion")) c.ba.refine_distortion = ba.boolean("refine_distortion");
   ba.finish();
 
   Section out = top.object("output");
@@ -349,6 +357,11 @@ std::string to_json(const Config& c) {
              {"global_growth", c.ba.global_growth},
              {"final_huber_px", c.ba.final_huber_px},
              {"final_max_iters", c.ba.final_max_iters}};
+  if (c.ba.refine_focal) j["ba"]["refine_focal"] = true;
+  if (c.ba.refine_distortion) j["ba"]["refine_distortion"] = true;
+  if (c.dataset.k1 != 0.0 || c.dataset.k2 != 0.0) {
+    j["dataset"]["distortion"] = {{"k1", c.dataset.k1}, {"k2", c.dataset.k2}};
+  }
   j["output"] = {
       {"dump_stages", c.output.dump_stages}, {"ply", c.output.ply}, {"colmap", c.output.colmap}};
   if (c.output.colmap_scene) j["output"]["colmap_scene"] = true;

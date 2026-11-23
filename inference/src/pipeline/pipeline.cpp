@@ -7,11 +7,14 @@
 #include <fstream>
 #include <memory>
 #include <numeric>
+#include <optional>
 
+#include <Eigen/LU>
 #include <nlohmann/json.hpp>
 
 #include "sfm/core/error.hpp"
 #include "sfm/core/npy.hpp"
+#include "sfm/core/parallel.hpp"
 #include "sfm/core/trace.hpp"
 #include "sfm/data/calib.hpp"
 #include "sfm/data/image_io.hpp"
@@ -22,6 +25,7 @@
 #include "sfm/export/export.hpp"
 #include "sfm/matching/verify.hpp"
 #include "sfm/pipeline/stage_io.hpp"
+#include "sfm/recon/distortion.hpp"
 #include "sfm/recon/incremental.hpp"
 
 namespace sfm::pipeline {
@@ -103,6 +107,175 @@ Metrics compute_metrics(const recon::Reconstruction& rec, const recon::TrackInde
 
 }  // namespace
 
+namespace {
+
+struct FocalSearch {
+  double scale = 1.0;
+  double cost = 0.0;
+  int evaluations = 0;
+};
+
+// One scale factor for every camera's focal length (variable projection: for each candidate the
+// final BA re-fits poses and points from the same start, and its cost is the candidate's score).
+// Golden-section search on log(scale) in [log 0.74, log 1.35]; the cost is in pixels, so it
+// compares across focal lengths. rec gets the best candidate's result.
+FocalSearch refine_focal(recon::Reconstruction& rec, const recon::TrackIndex& index,
+                         const config::BaConfig& fc, const BaMethod& ba_method) {
+  const recon::Reconstruction start = rec;
+  FocalSearch best;
+  recon::Reconstruction best_rec = rec;
+  const auto evaluate = [&](double log_s) {
+    recon::Reconstruction r = start;
+    const double s = std::exp(log_s);
+    for (auto& c : r.cameras) {
+      c.K(0, 0) *= s;
+      c.K(1, 1) *= s;
+      c.K(0, 1) *= s;  // skew scales with the focal length
+    }
+    const ba::Report rep = ba_method(r, index, fc, {});
+    ++best.evaluations;
+    if (best.evaluations == 1 || rep.final_cost < best.cost) {
+      best.cost = rep.final_cost;
+      best.scale = s;
+      best_rec = std::move(r);
+    }
+    return rep.final_cost;
+  };
+  constexpr double kGolden = 0.6180339887498949;
+  double a = std::log(0.74);
+  double b = std::log(1.35);
+  evaluate(0.0);  // the current focal length: kept unless a candidate is better
+  double x1 = b - kGolden * (b - a);
+  double x2 = a + kGolden * (b - a);
+  double f1 = evaluate(x1);
+  double f2 = evaluate(x2);
+  while (b - a > 2e-3) {  // scale resolution ~0.2 %
+    if (f1 < f2) {
+      b = x2;
+      x2 = x1;
+      f2 = f1;
+      x1 = b - kGolden * (b - a);
+      f1 = evaluate(x1);
+    } else {
+      a = x1;
+      x1 = x2;
+      f1 = f2;
+      x2 = a + kGolden * (b - a);
+      f2 = evaluate(x2);
+    }
+  }
+  rec = std::move(best_rec);
+  return best;
+}
+
+// Robust reprojection cost measured where the keypoints were recorded: project, distort, compare
+// with the recorded (raw) position. Comparable across distortion candidates, unlike a cost in
+// undistorted pixels (which grows or shrinks with the undistortion itself).
+double recorded_cost(const recon::Reconstruction& rec, const recon::TrackIndex& index,
+                     const std::vector<features::Features>& raw, const recon::Radial& d,
+                     double huber_px) {
+  double cost = 0.0;
+  for (int t = 0; t < index.track_count(); ++t) {
+    if (rec.has_point[static_cast<std::size_t>(t)] == 0) continue;
+    const Eigen::Vector3d& X = rec.points[static_cast<std::size_t>(t)];
+    for (const auto* o = index.begin(t); o != index.end(t); ++o) {
+      if (!recon::observation_used(rec, index, o)) continue;
+      const auto& c = rec.cameras[static_cast<std::size_t>(o->image)];
+      const Eigen::Vector3d p = c.K * (c.pose.R * X + c.pose.t);
+      if (p.z() <= 0.0) continue;
+      const Eigen::Vector2d ideal = p.head<2>() / p.z();
+      const auto& xy = raw[static_cast<std::size_t>(o->image)].xy;
+      const auto k = 2 * static_cast<std::size_t>(o->keypoint);
+      const double e = (recon::distort(c.K, d, ideal) - Eigen::Vector2d(xy[k], xy[k + 1])).norm();
+      cost += e <= huber_px ? e * e : 2.0 * huber_px * e - huber_px * huber_px;
+    }
+  }
+  return 0.5 * cost;
+}
+
+// How far from the centre the keypoints reach: 90th percentile of the normalised r^2 of every
+// recorded keypoint. Radial distortion shows only where r^2 is large.
+constexpr double kMinDistortionCoverage = 0.2;
+
+double keypoint_coverage(const std::vector<features::Features>& raw,
+                         const std::vector<Eigen::Matrix3d>& K) {
+  std::vector<double> r2;
+  for (std::size_t i = 0; i < raw.size(); ++i) {
+    const Eigen::Matrix3d Ki = K[i].inverse();
+    for (std::size_t k = 0; k + 1 < raw[i].xy.size(); k += 2) {
+      const Eigen::Vector3d x = Ki * Eigen::Vector3d(raw[i].xy[k], raw[i].xy[k + 1], 1.0);
+      r2.push_back(x.head<2>().squaredNorm() / (x.z() * x.z()));
+    }
+  }
+  return percentile(r2, 0.9);
+}
+
+struct DistortionSearch {
+  double k1 = 0.0;
+  double cost = 0.0;
+  double cost_start = 0.0;
+  int evaluations = 0;
+  std::vector<features::Features> feats;  // raw keypoints undistorted with the chosen k1
+};
+
+// Radial k1 by golden-section search in [-0.4, 0.4]: each candidate undistorts the recorded
+// keypoints with the cameras' current K, re-runs the final BA from the same start and is scored
+// by recorded_cost. rec gets the best candidate's result. k2 is kept.
+DistortionSearch refine_distortion(recon::Reconstruction& rec, const matching::Tracks& tracks,
+                                   const std::vector<features::Features>& raw, double k1_start,
+                                   double k2, const config::BaConfig& fc,
+                                   const BaMethod& ba_method) {
+  const recon::Reconstruction start = rec;
+  std::vector<Eigen::Matrix3d> K;
+  K.reserve(start.cameras.size());
+  for (const auto& c : start.cameras) K.push_back(c.K);
+  DistortionSearch best;
+  recon::Reconstruction best_rec = rec;
+  const auto evaluate = [&](double k1) {
+    const recon::Radial d{k1, k2};
+    std::vector<features::Features> f = recon::undistort_features(raw, K, d);
+    const recon::TrackIndex idx(tracks, f);
+    recon::Reconstruction r = start;
+    ba_method(r, idx, fc, {});
+    const double cost = recorded_cost(r, idx, raw, d, fc.huber_px);
+    ++best.evaluations;
+    if (best.evaluations == 1 || cost < best.cost) {
+      best.cost = cost;
+      best.k1 = k1;
+      best.feats = std::move(f);
+      best_rec = std::move(r);
+    }
+    return cost;
+  };
+  best.cost_start = evaluate(k1_start);  // the current k1: kept unless a candidate is better
+  constexpr double kGolden = 0.6180339887498949;
+  double a = -0.4;
+  double b = 0.4;
+  double x1 = b - kGolden * (b - a);
+  double x2 = a + kGolden * (b - a);
+  double f1 = evaluate(x1);
+  double f2 = evaluate(x2);
+  while (b - a > 1e-3) {
+    if (f1 < f2) {
+      b = x2;
+      x2 = x1;
+      f2 = f1;
+      x1 = b - kGolden * (b - a);
+      f1 = evaluate(x1);
+    } else {
+      a = x1;
+      x1 = x2;
+      f1 = f2;
+      x2 = a + kGolden * (b - a);
+      f2 = evaluate(x2);
+    }
+  }
+  rec = std::move(best_rec);
+  return best;
+}
+
+}  // namespace
+
 // Gray value per track: the pixel under its first observation.
 std::vector<std::uint8_t> track_gray(const recon::TrackIndex& index,
                                      const std::vector<data::Image8>& gray) {
@@ -115,6 +288,29 @@ std::vector<std::uint8_t> track_gray(const recon::TrackIndex& index,
     out[static_cast<std::size_t>(t)] =
         img.pixels[static_cast<std::size_t>(y) * static_cast<std::size_t>(img.width) +
                    static_cast<std::size_t>(x)];
+  }
+  return out;
+}
+
+std::vector<exporter::Rgb> track_rgb(const recon::TrackIndex& index,
+                                     const std::vector<fs::path>& images) {
+  std::vector<exporter::Rgb> out(static_cast<std::size_t>(index.track_count()),
+                                 exporter::Rgb{128, 128, 128});
+  std::vector<std::vector<int>> by_image(images.size());  // tracks whose first observation is here
+  for (int t = 0; t < index.track_count(); ++t) {
+    by_image[static_cast<std::size_t>(index.begin(t)->image)].push_back(t);
+  }
+  for (std::size_t i = 0; i < images.size(); ++i) {
+    if (by_image[i].empty()) continue;
+    const data::ImageRgb img = data::load_rgb(images[i]);
+    for (const int t : by_image[i]) {
+      const auto* o = index.begin(t);
+      const int x = std::clamp(static_cast<int>(std::lround(o->uv.x())), 0, img.width - 1);
+      const int y = std::clamp(static_cast<int>(std::lround(o->uv.y())), 0, img.height - 1);
+      const auto row = static_cast<std::size_t>(y) * static_cast<std::size_t>(img.width);
+      const std::size_t k = 3 * (row + static_cast<std::size_t>(x));
+      out[static_cast<std::size_t>(t)] = {img.rgb[k], img.rgb[k + 1], img.rgb[k + 2]};
+    }
   }
   return out;
 }
@@ -176,8 +372,10 @@ std::string to_string(Stage s) {
   return "?";
 }
 
-RunResult run_pipeline(const config::Config& cfg_in, const RunOptions& opt, core::Logger& log,
-                       const Registry& registry, ProgressSink* sink) {
+namespace {
+
+RunResult run_once(const config::Config& cfg_in, const RunOptions& opt, core::Logger& log,
+                   const Registry& registry, ProgressSink* sink) {
   if (opt.to < opt.from) throw ConfigError("--to must not come before --from");
   const auto t_total = Clock::now();
   const bool any_auto = cfg_in.features.method == "auto" || cfg_in.matching.method == "auto" ||
@@ -291,9 +489,21 @@ RunResult run_pipeline(const config::Config& cfg_in, const RunOptions& opt, core
   if (opt.from <= Stage::kFeatures) {
     begin(Stage::kFeatures);
     t0 = Clock::now();
-    for (std::size_t i = 0; i < gray.size(); ++i) {
+    if (is_cuda(cfg.features.method)) {
+      // The CUDA methods reuse one detector and its device buffers: one image after another.
+      for (std::size_t i = 0; i < gray.size(); ++i) {
+        check_cancel();
+        feats.push_back(feature_method(gray[i], d.use_masks ? &masks[i] : nullptr, cfg.features));
+      }
+    } else {
+      // The CPU methods keep no state: images in parallel, each result in its own slot (the same
+      // output as one after another). Bunny SIFT on 16 threads: 21 s -> see findings.
       check_cancel();
-      feats.push_back(feature_method(gray[i], d.use_masks ? &masks[i] : nullptr, cfg.features));
+      feats.resize(gray.size());
+      core::parallel_for(gray.size(), [&](std::size_t i) {
+        feats[i] = feature_method(gray[i], d.use_masks ? &masks[i] : nullptr, cfg.features);
+      });
+      check_cancel();
     }
     res.timings.features = seconds_since(t0);
     end(Stage::kFeatures, res.timings.features);
@@ -303,6 +513,12 @@ RunResult run_pipeline(const config::Config& cfg_in, const RunOptions& opt, core
   } else {
     feats = load_features(stages / "features", ids.size());
   }
+  // Lens distortion: the stages below work on undistorted keypoints (a pinhole camera); feats_raw
+  // keeps the recorded positions for the colours, the export and the distortion search.
+  recon::Radial dist{d.k1, d.k2};
+  std::vector<features::Features> feats_raw;
+  if (dist.any() || cfg.ba.refine_distortion) feats_raw = feats;
+  if (dist.any()) feats = recon::undistort_features(feats_raw, K, dist);
   if (opt.to == Stage::kFeatures) {
     res.timings.total = seconds_since(t_total);
     write_text(res.run_dir / "timings.json", to_json(res.timings));
@@ -351,10 +567,15 @@ RunResult run_pipeline(const config::Config& cfg_in, const RunOptions& opt, core
 
   // --- reconstruction ------------------------------------------------------------------------
   const recon::TrackIndex index(tracks, feats);
+  // Recorded keypoint positions (differ from index only with lens distortion): for pixel lookups.
+  std::optional<recon::TrackIndex> raw_store;
+  if (dist.any()) raw_store.emplace(tracks, feats_raw);
+  const recon::TrackIndex& raw_index = raw_store ? *raw_store : index;
+  std::optional<recon::TrackIndex> refined_store;  // set by refine_distortion
   recon::Reconstruction rec;
   recon::IncrementalReport rep;
   // Gray values for snapshots and export (cheap: one pixel per track).
-  const std::vector<std::uint8_t> point_gray = track_gray(index, gray);
+  const std::vector<std::uint8_t> point_gray = track_gray(raw_index, gray);
   if (opt.from <= Stage::kReconstruction) {
     begin(Stage::kReconstruction);
     t0 = Clock::now();
@@ -420,6 +641,40 @@ RunResult run_pipeline(const config::Config& cfg_in, const RunOptions& opt, core
                                   {"iterations", last_ba.iterations},
                                   {"initial_cost", last_ba.initial_cost},
                                   {"final_cost", last_ba.final_cost}});
+      if (cfg.ba.refine_focal) {
+        const auto tf = Clock::now();
+        const FocalSearch fs_res = refine_focal(rec, index, fc, ba_method);
+        res.timings.ba += seconds_since(tf);
+        log.info("recon.focal_refined", {{"scale", fs_res.scale},
+                                         {"fx", rec.cameras.front().K(0, 0)},
+                                         {"cost_before", last_ba.final_cost},
+                                         {"cost_after", fs_res.cost},
+                                         {"evaluations", fs_res.evaluations}});
+      }
+      const double coverage = cfg.ba.refine_distortion ? keypoint_coverage(feats_raw, K) : 0.0;
+      if (cfg.ba.refine_distortion && coverage < kMinDistortionCoverage) {
+        // Keypoints near the image centre only (e.g. a masked object): radial distortion barely
+        // moves them and k1 trades off against the focal length. Measured on the masked bunny:
+        // k1 = -0.15 estimated as -0.345.
+        log.warn("recon.distortion_not_refined",
+                 {{"r2_p90", coverage},
+                  {"needs", kMinDistortionCoverage},
+                  {"note", "keypoints cover only the image centre; k1 left as configured"}});
+      } else if (cfg.ba.refine_distortion) {
+        const auto td = Clock::now();
+        DistortionSearch ds =
+            refine_distortion(rec, tracks, feats_raw, dist.k1, dist.k2, fc, ba_method);
+        res.timings.ba += seconds_since(td);
+        log.info("recon.distortion_refined", {{"k1", ds.k1},
+                                              {"k2", dist.k2},
+                                              {"cost_recorded_px", ds.cost},
+                                              {"cost_at_configured_k1", ds.cost_start},
+                                              {"evaluations", ds.evaluations}});
+        dist.k1 = ds.k1;
+        feats = std::move(ds.feats);
+        refined_store.emplace(tracks, feats);
+        if (!raw_store) raw_store.emplace(tracks, feats_raw);
+      }
       if (sink != nullptr) {
         sink->ba_done(make_snapshot(rec, index, ids, point_gray, sequence++), last_ba);
       }
@@ -432,6 +687,9 @@ RunResult run_pipeline(const config::Config& cfg_in, const RunOptions& opt, core
       core::npy_write(stages / "reconstruction" / "report.npy",
                       core::NpyArray::from<std::int32_t>(
                           {3}, {rep.pnp_attempts, rep.pnp_failures, rep.ba_runs}));
+      // The distortion the reconstruction was made with (refine_distortion may change k1).
+      core::npy_write(stages / "reconstruction" / "distortion.npy",
+                      core::NpyArray::from<double>({2}, {dist.k1, dist.k2}));
     }
   } else {
     rec = load_reconstruction(stages / "reconstruction", K);
@@ -441,8 +699,38 @@ RunResult run_pipeline(const config::Config& cfg_in, const RunOptions& opt, core
     rep.pnp_attempts = r[0];
     rep.pnp_failures = r[1];
     rep.ba_runs = r[2];
+    const fs::path dfile = stages / "reconstruction" / "distortion.npy";
+    if (fs::exists(dfile)) {
+      const auto k = core::npy_read(dfile).to_vector<double>();
+      if (k.size() == 2 && (k[0] != dist.k1 || k[1] != dist.k2)) {
+        dist = {k[0], k[1]};
+        if (feats_raw.empty()) feats_raw = feats;
+        feats = recon::undistort_features(feats_raw, K, dist);
+        refined_store.emplace(tracks, feats);
+        if (!raw_store) raw_store.emplace(tracks, feats_raw);
+      }
+    }
   }
-  res.metrics = compute_metrics(rec, index, feats, pairs.size(), tracks.count, ids, gt, rep);
+  const recon::TrackIndex& final_index = refined_store ? *refined_store : index;
+  const recon::TrackIndex& final_raw_index = raw_store ? *raw_store : index;
+  const std::size_t n_pairs = pairs.size();
+  res.metrics = compute_metrics(rec, final_index, feats, n_pairs, tracks.count, ids, gt, rep);
+  {
+    RunModel m;
+    m.names = names;
+    m.k1 = dist.k1;
+    m.k2 = dist.k2;
+    for (const auto& c : rec.cameras) {
+      m.registered.push_back(c.registered);
+      m.K.push_back(c.K);
+      m.R.push_back(c.pose.R);
+      m.t.push_back(c.pose.t);
+    }
+    for (std::size_t t = 0; t < rec.points.size(); ++t) {
+      if (rec.has_point[t] != 0) m.points.push_back(rec.points[t]);
+    }
+    res.model = std::move(m);
+  }
   write_text(res.run_dir / "metrics.json", to_json(*res.metrics));
   log.info("stage.reconstruction",
            {{"registered", static_cast<int>(res.metrics->registered_ids.size())},
@@ -455,17 +743,29 @@ RunResult run_pipeline(const config::Config& cfg_in, const RunOptions& opt, core
   if (opt.to >= Stage::kExport) {
     begin(Stage::kExport);
     t0 = Clock::now();
-    if (cfg.output.ply) exporter::write_ply(res.run_dir / "model.ply", rec, point_gray);
+    std::vector<fs::path> sources;
+    sources.reserve(files.size());
+    for (const auto& e : files) sources.push_back(e.image);
+    // Colours from the images (the stages before work on gray); only when something is written.
+    const bool any_export = cfg.output.ply || cfg.output.colmap || cfg.output.colmap_scene;
+    const std::vector<exporter::Rgb> colours =
+        any_export ? track_rgb(final_raw_index, sources) : std::vector<exporter::Rgb>{};
+    const int w = gray.front().width;
+    const int h = gray.front().height;
+    if (res.model && !colours.empty()) {
+      for (std::size_t t = 0; t < rec.points.size(); ++t) {
+        if (rec.has_point[t] != 0) res.model->colours.push_back(colours[t]);
+      }
+    }
+    if (cfg.output.ply) exporter::write_ply(res.run_dir / "model.ply", rec, colours);
     if (cfg.output.colmap) {
-      exporter::write_colmap_text(res.run_dir / "colmap", rec, index, feats, names,
-                                  gray.front().width, gray.front().height, point_gray);
+      // Recorded keypoints with the OPENCV model when there is distortion, else pinhole.
+      exporter::write_colmap(res.run_dir / "colmap", rec, final_index,
+                             dist.any() ? feats_raw : feats, names, w, h, colours, dist);
     }
     if (cfg.output.colmap_scene) {
-      std::vector<fs::path> sources;
-      sources.reserve(files.size());
-      for (const auto& e : files) sources.push_back(e.image);
-      exporter::write_colmap_scene(res.run_dir / "scene", rec, index, feats, sources,
-                                   gray.front().width, gray.front().height, point_gray);
+      exporter::write_colmap_scene(res.run_dir / "scene", rec, final_index, feats, sources, w, h,
+                                   colours, dist);
     }
     res.timings.export_ = seconds_since(t0);
     end(Stage::kExport, res.timings.export_);
@@ -475,6 +775,27 @@ RunResult run_pipeline(const config::Config& cfg_in, const RunOptions& opt, core
   log.info("run.done", {{"seconds", res.timings.total}});
   if (sink != nullptr) sink->finished(*res.metrics, res.timings);
   return res;
+}
+
+}  // namespace
+
+// With ba.refine_distortion the reconstruction is made with the configured k1, so a strong
+// distortion can already have cost registrations (ETH3D courtyard, k1 = -0.10: 23/38). Each pass
+// re-runs with the estimate until it moves by less than 0.005 (at most 3 passes).
+RunResult run_pipeline(const config::Config& cfg, const RunOptions& opt, core::Logger& log,
+                       const Registry& registry, ProgressSink* sink) {
+  if (!cfg.ba.refine_distortion || opt.from > Stage::kFeatures) {
+    return run_once(cfg, opt, log, registry, sink);
+  }
+  config::Config c = cfg;
+  RunResult r;
+  for (int pass = 1;; ++pass) {
+    r = run_once(c, opt, log, registry, sink);
+    if (!r.model || pass == 3 || std::abs(r.model->k1 - c.dataset.k1) < 0.005) break;
+    log.info("run.distortion_pass", {{"pass", pass + 1}, {"k1", r.model->k1}});
+    c.dataset.k1 = r.model->k1;
+  }
+  return r;
 }
 
 std::string to_json(const Metrics& m) {

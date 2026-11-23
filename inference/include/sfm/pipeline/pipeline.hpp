@@ -3,11 +3,14 @@
 // -> export, with per-stage dumps, metrics.json and timings.json under
 // <run.output_dir>/<run.name>/.
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
+
+#include <Eigen/Core>
 
 #include "sfm/config/config.hpp"
 #include "sfm/core/logger.hpp"
@@ -61,10 +64,27 @@ struct Timings {  // wall seconds per stage (0 when the stage was loaded, not ru
   double total = 0.0;
 };
 
+// The reconstruction as plain arrays (for bindings and library users): one entry per image in the
+// range, registered or not, and one per reconstructed point. colours is empty when the export
+// stage did not run or wrote nothing (it is read from the images at export).
+struct RunModel {
+  std::vector<std::string> names;  // image file names
+  std::vector<bool> registered;
+  std::vector<Eigen::Matrix3d> K;  // pixel centres at integer coordinates
+  std::vector<Eigen::Matrix3d> R;  // world -> camera
+  std::vector<Eigen::Vector3d> t;
+  std::vector<Eigen::Vector3d> points;
+  std::vector<std::array<std::uint8_t, 3>> colours;
+  double k1 = 0.0;  // radial distortion the model was made with (dataset.distortion or refined)
+  double k2 = 0.0;
+};
+
 struct RunResult {
   std::filesystem::path run_dir;
   std::optional<Metrics> metrics;  // set when the reconstruction stage ran or was loaded
   Timings timings;
+  // Set with metrics.
+  std::optional<RunModel> model;
 };
 
 // Runs the configured pipeline. Writes <run_dir>/run.log, config.json (the effective config, with

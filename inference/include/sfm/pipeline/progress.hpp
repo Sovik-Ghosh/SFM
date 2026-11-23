@@ -4,12 +4,14 @@
 // A sink never changes the result: a run with a sink writes the same metrics.json as without.
 
 #include <cstdint>
+#include <filesystem>
 #include <vector>
 
 #include <Eigen/Core>
 
 #include "sfm/ba/ba.hpp"
 #include "sfm/data/image_io.hpp"
+#include "sfm/export/export.hpp"
 #include "sfm/recon/reconstruction.hpp"
 
 namespace sfm::pipeline {
@@ -42,6 +44,11 @@ SceneSnapshot make_snapshot(const recon::Reconstruction& rec, const recon::Track
 // Gray value per track: the pixel under its first observation (images in track image order).
 std::vector<std::uint8_t> track_gray(const recon::TrackIndex& index,
                                      const std::vector<data::Image8>& gray);
+
+// Colour per track: the RGB pixel under its first observation, read from images[image] (loaded only
+// for images that hold a first observation). Throws IoError on an unreadable image.
+std::vector<exporter::Rgb> track_rgb(const recon::TrackIndex& index,
+                                     const std::vector<std::filesystem::path>& images);
 
 class ProgressSink {
  public:

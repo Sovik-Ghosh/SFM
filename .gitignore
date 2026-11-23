@@ -411,3 +411,7 @@ compile_commands.json
 .cache/
 __pycache__/
 junit-*.xml
+
+# Vendored code is never ignored: the Visual Studio pattern *_h.h above matched a pybind11 header
+# (pybind11/conduit/wrap_include_python_h.h), which left it out of v1.3.0.
+!third_party/**

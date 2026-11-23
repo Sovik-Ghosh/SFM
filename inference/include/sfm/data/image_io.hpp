@@ -24,6 +24,16 @@ inline std::uint8_t rgb_to_gray(std::uint8_t r, std::uint8_t g, std::uint8_t b) 
   return static_cast<std::uint8_t>((4899U * r + 9617U * g + 1868U * b + 8192U) >> 14);
 }
 
+// 8-bit RGB, interleaved, row-major: width * height * 3 bytes.
+struct ImageRgb {
+  int width = 0;
+  int height = 0;
+  std::vector<std::uint8_t> rgb;
+};
+
+// Any colour or gray image -> RGB (gray is replicated). Throws IoError.
+ImageRgb load_rgb(const std::filesystem::path& path);
+
 // Any colour or gray image -> gray (a 1-channel file is returned unchanged). Throws IoError.
 Image8 load_gray(const std::filesystem::path& path);
 
