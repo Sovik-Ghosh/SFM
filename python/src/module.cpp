@@ -80,6 +80,12 @@ py::dict run(const std::string& json_text, const std::string& base_dir, const st
   if (r.model) {
     const auto& m = *r.model;
     out["names"] = m.names;
+    py::array_t<int> sz({static_cast<py::ssize_t>(m.sizes.size()), py::ssize_t{2}});
+    for (std::size_t i = 0; i < m.sizes.size(); ++i) {
+      sz.mutable_at(static_cast<py::ssize_t>(i), 0) = m.sizes[i][0];
+      sz.mutable_at(static_cast<py::ssize_t>(i), 1) = m.sizes[i][1];
+    }
+    out["sizes"] = sz;
     py::array_t<bool> reg(static_cast<py::ssize_t>(m.registered.size()));
     for (std::size_t i = 0; i < m.registered.size(); ++i) {
       reg.mutable_at(static_cast<py::ssize_t>(i)) = m.registered[i];

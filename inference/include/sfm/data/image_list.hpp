@@ -43,8 +43,7 @@ Krt load_camera(const config::DatasetConfig& d, const ImageEntry& e, int width, 
 std::optional<double> exif_focal_px(const std::filesystem::path& jpeg, int max_side,
                                     double sensor_width_mm);
 
-// EXIF orientation (1..8) of a JPEG, 1 when absent. Images are used as stored, so anything other
-// than 1 means the photo is displayed rotated by viewers but read unrotated here.
+// EXIF orientation (1..8) of a JPEG, 1 when absent or not a JPEG. load_gray / load_rgb apply it.
 int exif_orientation(const std::filesystem::path& jpeg);
 
 }  // namespace sfm::data

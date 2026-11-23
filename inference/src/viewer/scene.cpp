@@ -37,6 +37,14 @@ void frustum(std::vector<Vertex>& out, const Eigen::Matrix3d& K, const eval::Pos
   line(out, top, top + up * static_cast<float>(0.2 * depth), c);
 }
 
+// Frustum size: the configured image size, or the camera's own from its principal point.
+int frustum_width(const SceneOptions& o, const Eigen::Matrix3d& K) {
+  return o.image_width > 0 ? o.image_width : static_cast<int>(std::lround(2.0 * K(0, 2) + 1.0));
+}
+int frustum_height(const SceneOptions& o, const Eigen::Matrix3d& K) {
+  return o.image_height > 0 ? o.image_height : static_cast<int>(std::lround(2.0 * K(1, 2) + 1.0));
+}
+
 }  // namespace
 
 std::array<Eigen::Vector3d, 4> frustum_corners(const Eigen::Matrix3d& K, const eval::Pose& pose,
@@ -168,14 +176,15 @@ SceneGeometry build_scene(const pipeline::SceneSnapshot& s, const SceneOptions& 
     const Rgb c = sel       ? Rgb{255, 80, 40}
                   : grouped ? camera_group_color(o.camera_group[i])
                             : camera_color(static_cast<int>(k), static_cast<int>(s.order.size()));
-    frustum(g.lines, s.K[i], pose, o.image_width, o.image_height, sel ? 1.5 * depth : depth, c);
+    frustum(g.lines, s.K[i], pose, frustum_width(o, s.K[i]), frustum_height(o, s.K[i]),
+            sel ? 1.5 * depth : depth, c);
   }
   if (!o.ground_truth.empty()) {
     for (std::size_t i = 0; i < o.ground_truth.size() && i < s.registered.size(); ++i) {
       if (s.registered[i] == 0) continue;
       // Orange, as the Ground truth layer's swatch (theme kWarn 0xFFA552).
-      frustum(g.lines, s.K[i], o.ground_truth[i], o.image_width, o.image_height, depth,
-              Rgb{255, 165, 82});
+      frustum(g.lines, s.K[i], o.ground_truth[i], frustum_width(o, s.K[i]),
+              frustum_height(o, s.K[i]), depth, Rgb{255, 165, 82});
       line(g.lines, o.ground_truth[i].centre().cast<float>(), g.camera_centres[i],
            Rgb{230, 60, 60});
     }

@@ -1,7 +1,8 @@
 #pragma once
 // Image loading for the dataset: RGB -> 8-bit gray, silhouette -> binary mask. Formats: whatever
-// stb_image reads here: PPM/PGM (the bunny set), PNG and JPEG (baseline and progressive; EXIF
-// orientation is not applied). Pixels are row-major, width * height bytes.
+// stb_image reads here: PPM/PGM (the bunny set), PNG and JPEG (baseline and progressive).
+// load_gray and load_rgb apply a JPEG's EXIF orientation; load_mask does not (masks are drawn on
+// the displayed image and saved without it). Pixels are row-major, width * height bytes.
 
 #include <cstddef>
 #include <cstdint>
@@ -31,10 +32,12 @@ struct ImageRgb {
   std::vector<std::uint8_t> rgb;
 };
 
-// Any colour or gray image -> RGB (gray is replicated). Throws IoError.
+// Any colour or gray image -> RGB (gray is replicated), as displayed: a JPEG's EXIF orientation is
+// applied (a portrait phone photo stored landscape comes out portrait). Throws IoError.
 ImageRgb load_rgb(const std::filesystem::path& path);
 
-// Any colour or gray image -> gray (a 1-channel file is returned unchanged). Throws IoError.
+// Any colour or gray image -> gray (a 1-channel file is returned unchanged), with the EXIF
+// orientation applied as in load_rgb. Throws IoError.
 Image8 load_gray(const std::filesystem::path& path);
 
 // Silhouette -> mask: 255 where the file is 0 (object), 0 elsewhere. The bunny silhouettes are not

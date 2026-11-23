@@ -59,7 +59,7 @@ and names the flag to add (`-DCMAKE_CUDA_ARCHITECTURES=<arch>`, e.g. `90` for an
 ## Build
 
 ```bash
-git clone --depth 1 https://github.com/Sovik-Ghosh/sfm-cuda.git   # --depth 1: 50 MB instead of 440 MB
+git clone https://github.com/Sovik-Ghosh/sfm-cuda.git
 cd sfm-cuda
 cmake --preset release
 cmake --build --preset release -j
@@ -154,23 +154,34 @@ separate process; Epipole's are `bench_stages` in one process (a single `sfm_run
 
 ## Use your own images
 
-1. **Photos:** put them in one folder, e.g. `data/mine/images/`: JPEG or PNG, any file names (they
-   are taken in name order), all the same size, taken with one camera at one zoom setting.
-   Photos rotated only by an EXIF tag are read unrotated: the log warns about them.
-2. **Config:** copy `configs/bunny_sift_tuned2.json` and replace its `dataset` block:
-   ```json
-   "dataset": { "root": "data/mine", "images_dir": "images", "masks_dir": "", "calib_dir": "",
-                "layout": "folder", "first": 0, "last": -1, "use_masks": false,
-                "camera": { "exif": true } }
-   ```
-   and `run.name` (the output folder). `"last": -1` takes every image. Raise `memory.max_images`
-   (64 in the bunny config) to at least the number of photos, and `memory.arena_mb` for many
-   images. For a video or a walk, use sequential pairs instead of all pairs:
-   `"pairs": { "mode": "sequential", "window": 10, "keyframe_stride": 10 }`.
-3. **Run** from the repository folder (a relative `root` is relative to the current folder):
-   `sfm_run configs/mine.json`, then `sfm_viewer outputs/<run name>`.
+```bash
+./build/release/inference/apps/sfm_run --images path/to/photos
+./build/release/inference/apps/sfm_viewer outputs/photos
+```
 
-**The camera.** `"exif": true` reads the 35 mm-equivalent focal length from each JPEG's EXIF data
+That's all: every JPEG and PNG in the folder, any file names (taken in name order), portrait and
+landscape mixed (EXIF rotation is applied), one camera at one zoom setting. The focal length comes
+from the photos' EXIF data and is refined after bundle adjustment; the result goes to
+`outputs/<folder name>/` with `model.ply`, `colmap/` and `scene/` (for 3D Gaussian Splatting and
+nerfstudio).
+
+Options: `--masks <folder>` (`<photo name>.png` per photo, white = object; `--black-masks` for the
+opposite), `--fx <pixels>` if you know the focal length, `--sequential` for a video or a walk
+(neighbouring frames only), `--name`, `--output`, `--backend cpu|gpu`. From Python it is
+`epipole.reconstruct("path/to/photos")` ([Python](#python)).
+
+**A config file** gives full control: copy `configs/bunny_sift_tuned2.json` (or the `config.json` a
+run writes) and change the `dataset` block:
+```json
+"dataset": { "root": "data/mine", "images_dir": "images", "masks_dir": "", "calib_dir": "",
+             "layout": "folder", "first": 0, "last": -1, "use_masks": false,
+             "camera": { "exif": true } }
+```
+`"last": -1` takes every image (and `memory.max_images` follows the folder). Run it from the
+repository folder with `sfm_run configs/mine.json` (a relative `root` is relative to the current
+folder).
+
+**The camera** (in a config; `--images` uses EXIF and `refine_focal`). `"exif": true` reads the 35 mm-equivalent focal length from each JPEG's EXIF data
 (phones and most cameras write it); without it, add `"sensor_width_mm"` for your camera, or the
 focal length defaults to 1.2 × the longer image side. If you know the focal length in pixels, give
 it instead: `"camera": { "fx": 3000 }` (`fy`, `cx`, `cy` are optional; the centre is the image
@@ -194,9 +205,9 @@ fx 0  cx 0
 0  0  1  0
 ```
 
-**Masks** (optional): `masks_dir` with `IMG_2041.png` (or `.pgm`) per photo, `"use_masks": true`.
-Features are kept only on the object: black pixels by default (the bunny), or white ones with
-`"mask_object": "white"`.
+**Masks** in a config (optional): `masks_dir` with `IMG_2041.png` (or `.pgm`) per photo,
+`"use_masks": true`. Features are kept only on the object: black pixels by default (the bunny), or
+white ones with `"mask_object": "white"` (the `--images` default).
 
 ## Python
 

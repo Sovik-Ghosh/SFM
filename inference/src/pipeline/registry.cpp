@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "sfm/ba/adjust.hpp"
 #include "sfm/core/device_info.hpp"
@@ -20,6 +21,21 @@
 namespace sfm::pipeline {
 
 namespace {
+
+// The cached detector that fits (same image size and parameters), else a new one; keeps at most
+// kMaxDetectors (device memory), dropping the oldest.
+constexpr std::size_t kMaxDetectors = 4;
+
+template <class Detector, class Fits, class Make>
+Detector& cached_detector(std::vector<std::unique_ptr<Detector>>& cache, const Fits& fits,
+                          const Make& make) {
+  for (auto& d : cache) {
+    if (fits(*d)) return *d;
+  }
+  if (cache.size() == kMaxDetectors) cache.erase(cache.begin());
+  cache.push_back(make());
+  return *cache.back();
+}
 
 features::SiftParams sift_params(const config::FeaturesConfig& c) {
   features::SiftParams p;
@@ -55,8 +71,9 @@ Registry make_default() {
     return features::detect_orb(gray, mask, p);
   });
 #if SFM_WITH_CUDA
-  // One OrbCuda per (parameters, image size), kept across images (device buffers are reused).
-  auto cached = std::make_shared<std::unique_ptr<features::OrbCuda>>();
+  // OrbCuda detectors kept across images (device buffers are reused), one per image size: photo
+  // sets mix portrait and landscape. At most kMaxDetectors sizes; the oldest is dropped.
+  auto cached = std::make_shared<std::vector<std::unique_ptr<features::OrbCuda>>>();
   r.add_features("orb_cuda", [cached](const data::Image8& gray, const data::Image8* mask,
                                       const config::FeaturesConfig& c) {
     features::OrbParams p;
@@ -65,14 +82,16 @@ Registry make_default() {
     p.scale = c.scale;
     p.fast_threshold = c.fast_threshold;
     p.edge_border = c.edge_border;
-    auto& orb = *cached;
-    if (!orb || orb->width() != gray.width || orb->height() != gray.height ||
-        orb->params().max_features != p.max_features || orb->params().levels != p.levels ||
-        orb->params().scale != p.scale || orb->params().fast_threshold != p.fast_threshold ||
-        orb->params().edge_border != p.edge_border) {
-      orb = std::make_unique<features::OrbCuda>(p, gray.width, gray.height);
-    }
-    return orb->detect(gray, mask);
+    const auto fits = [&](const features::OrbCuda& d) {
+      const auto& q = d.params();
+      return d.width() == gray.width && d.height() == gray.height &&
+             q.max_features == p.max_features && q.levels == p.levels && q.scale == p.scale &&
+             q.fast_threshold == p.fast_threshold && q.edge_border == p.edge_border;
+    };
+    const auto make = [&] {
+      return std::make_unique<features::OrbCuda>(p, gray.width, gray.height);
+    };
+    return cached_detector(*cached, fits, make).detect(gray, mask);
   });
 #endif
   r.add_features("sift_cpu", [](const data::Image8& gray, const data::Image8* mask,
@@ -80,21 +99,23 @@ Registry make_default() {
     return features::detect_sift(gray, mask, sift_params(c));
   });
 #if SFM_WITH_CUDA
-  // One SiftCuda per (parameters, image size), as for ORB.
-  auto sift_cached = std::make_shared<std::unique_ptr<features::SiftCuda>>();
+  // SiftCuda detectors, one per image size, as for ORB.
+  auto sift_cached = std::make_shared<std::vector<std::unique_ptr<features::SiftCuda>>>();
   r.add_features("sift_cuda", [sift_cached](const data::Image8& gray, const data::Image8* mask,
                                             const config::FeaturesConfig& c) {
     const features::SiftParams p = sift_params(c);
-    auto& sift = *sift_cached;
-    const auto& q = sift ? sift->params() : p;
-    if (!sift || sift->width() != gray.width || sift->height() != gray.height ||
-        q.max_features != p.max_features || q.octaves != p.octaves ||
-        q.octave_resolution != p.octave_resolution || q.first_octave != p.first_octave ||
-        q.peak_threshold != p.peak_threshold || q.edge_threshold != p.edge_threshold ||
-        q.max_orientations != p.max_orientations) {
-      sift = std::make_unique<features::SiftCuda>(p, gray.width, gray.height);
-    }
-    return sift->detect(gray, mask);
+    const auto fits = [&](const features::SiftCuda& d) {
+      const auto& q = d.params();
+      return d.width() == gray.width && d.height() == gray.height &&
+             q.max_features == p.max_features && q.octaves == p.octaves &&
+             q.octave_resolution == p.octave_resolution && q.first_octave == p.first_octave &&
+             q.peak_threshold == p.peak_threshold && q.edge_threshold == p.edge_threshold &&
+             q.max_orientations == p.max_orientations;
+    };
+    const auto make = [&] {
+      return std::make_unique<features::SiftCuda>(p, gray.width, gray.height);
+    };
+    return cached_detector(*sift_cached, fits, make).detect(gray, mask);
   });
 #endif
   r.add_matching("bf_cpu", [](const std::vector<features::Features>& f,

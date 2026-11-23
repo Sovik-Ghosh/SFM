@@ -1,5 +1,5 @@
 sfm_add_test(test_pipeline
-  SOURCES test_registry.cpp test_stage_io.cpp test_export.cpp test_e2e_synthetic.cpp
+  SOURCES test_registry.cpp test_stage_io.cpp test_export.cpp test_e2e_synthetic.cpp test_photos.cpp
   LIBS sfm::pipeline
   LABELS unit)
 target_include_directories(test_pipeline PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../recon)  # scene.hpp

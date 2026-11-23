@@ -32,9 +32,12 @@ void append(std::vector<std::uint8_t>* out, const void* data, int size) {
 
 // A w x h gray JPEG (stb), optionally with an EXIF APP1 segment after SOI holding Orientation,
 // FocalLengthIn35mmFilm (0: absent) and FocalLength in mm (0: absent). Little-endian TIFF.
-std::string jpeg(int w, int h, int orientation, int f35, double focal_mm) {
+// pixels: w * h gray values, or a gradient when null.
+std::string jpeg(int w, int h, int orientation, int f35, double focal_mm,
+                 const std::vector<std::uint8_t>* pixels = nullptr) {
   std::vector<std::uint8_t> px(static_cast<std::size_t>(w * h));
   for (std::size_t i = 0; i < px.size(); ++i) px[i] = static_cast<std::uint8_t>(i * 7);
+  if (pixels != nullptr) px = *pixels;
   std::vector<std::uint8_t> j;
   const auto sink = [](void* ctx, void* d, int n) {
     append(static_cast<std::vector<std::uint8_t>*>(ctx), d, n);
@@ -192,10 +195,11 @@ TEST_F(ImageList, ExifFocalLength) {
 }
 
 TEST_F(ImageList, JpegLoadsAsGray) {
-  const auto p = write("a.jpg", jpeg(16, 12, 6, 27, 0));  // with an EXIF segment
+  // Stored 16 x 12 with EXIF orientation 6 (rotate 90 degrees clockwise): displayed 12 x 16.
+  const auto p = write("a.jpg", jpeg(16, 12, 6, 27, 0));
   const auto g = sfm::data::load_gray(p);
-  EXPECT_EQ(g.width, 16);
-  EXPECT_EQ(g.height, 12);
+  EXPECT_EQ(g.width, 12);
+  EXPECT_EQ(g.height, 16);
   EXPECT_EQ(g.size(), 16u * 12u);
 }
 
@@ -205,4 +209,50 @@ TEST_F(ImageList, MaskPolarity) {
   EXPECT_EQ(black.pixels, (std::vector<std::uint8_t>{255, 0, 0}));
   const auto white = sfm::data::load_mask(p, true);
   EXPECT_EQ(white.pixels, (std::vector<std::uint8_t>{0, 255, 255}));
+}
+
+// EXIF orientation 1..8 as displayed: a 32 x 16 image, bright in its top-left quadrant only. Each
+// orientation moves that quadrant (and 5-8 swap width and height); gray and RGB agree.
+TEST_F(ImageList, ExifOrientationIsApplied) {
+  const int W = 32;
+  const int H = 16;
+  std::vector<std::uint8_t> px(static_cast<std::size_t>(W * H), 0);
+  for (int y = 0; y < H / 2; ++y) {
+    for (int x = 0; x < W / 2; ++x) px[static_cast<std::size_t>(y) * W + x] = 255;
+  }
+  // Where the centre (8, 4) of the bright quadrant is displayed, per orientation.
+  // Written out per orientation, independently of image_io.cpp's version.
+  const auto shown = [&](int o, int x, int y) -> std::pair<int, int> {
+    std::pair<int, int> at{x, y};
+    if (o == 2) at = {W - 1 - x, y};
+    if (o == 3) at = {W - 1 - x, H - 1 - y};
+    if (o == 4) at = {x, H - 1 - y};
+    if (o == 5) at = {y, x};
+    if (o == 6) at = {H - 1 - y, x};
+    if (o == 7) at = {H - 1 - y, W - 1 - x};
+    if (o == 8) at = {y, W - 1 - x};
+    return at;
+  };
+  for (int o = 1; o <= 8; ++o) {
+    SCOPED_TRACE(o);
+    const auto p = write("o" + std::to_string(o) + ".jpg", jpeg(W, H, o, 0, 0.0, &px));
+    EXPECT_EQ(sfm::data::exif_orientation(p), o);
+    const auto g = sfm::data::load_gray(p);
+    const auto c = sfm::data::load_rgb(p);
+    const bool swap = o >= 5;
+    EXPECT_EQ(g.width, swap ? H : W);
+    EXPECT_EQ(g.height, swap ? W : H);
+    EXPECT_EQ(c.width, g.width);
+    EXPECT_EQ(c.height, g.height);
+    // A point inside the bright quadrant, and one inside the opposite (dark) quadrant.
+    const auto [bx, by] = shown(o, 8, 4);
+    const auto [dx, dy] = shown(o, W - 9, H - 5);
+    const auto at = [&](int x, int y) {
+      return g.pixels[static_cast<std::size_t>(y) * static_cast<std::size_t>(g.width) +
+                      static_cast<std::size_t>(x)];
+    };
+    EXPECT_GT(at(bx, by), 200);
+    EXPECT_LT(at(dx, dy), 50);
+    EXPECT_GT(c.rgb[3 * (static_cast<std::size_t>(by) * c.width + bx)], 200);
+  }
 }

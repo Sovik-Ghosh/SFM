@@ -10,9 +10,10 @@
 #include <vector>
 
 #include <Eigen/Geometry>
-#include <stb_image.h>
 
 #include "sfm/core/error.hpp"
+#include "sfm/data/image_io.hpp"
+#include "sfm/data/image_list.hpp"
 #include "sfm/export/export.hpp"
 
 // PNG writing for the scene export; static, so it cannot clash with another stb_image_write copy.
@@ -35,6 +36,8 @@ std::ofstream open(const std::filesystem::path& file, bool binary) {
 struct ColmapModel {
   struct Camera {
     int id = 0;
+    int width = 0;
+    int height = 0;
     double fx = 0, fy = 0, cx = 0, cy = 0;  // COLMAP pixel convention (+0.5)
   };
   recon::Radial dist;  // any(): OPENCV model, else PINHOLE
@@ -53,8 +56,6 @@ struct ColmapModel {
     double error = 0.0;
     std::vector<std::pair<int, int>> track;  // (image id, keypoint index)
   };
-  int width = 0;
-  int height = 0;
   std::vector<Camera> cameras;
   std::vector<Image> images;
   std::vector<Point> points;
@@ -62,11 +63,9 @@ struct ColmapModel {
 
 ColmapModel build_model(const recon::Reconstruction& rec, const recon::TrackIndex& index,
                         const std::vector<features::Features>& features,
-                        const std::vector<std::string>& names, int width, int height,
+                        const std::vector<std::string>& names, const std::vector<ImageSize>& sizes,
                         const std::vector<Rgb>& colours, const recon::Radial& dist) {
   ColmapModel m;
-  m.width = width;
-  m.height = height;
   m.dist = dist;
 
   // keypoint -> track, per image; keypoint -> observation used for its point (not an outlier).
@@ -91,7 +90,17 @@ ColmapModel build_model(const recon::Reconstruction& rec, const recon::TrackInde
     const auto& c = rec.cameras[i];
     if (!c.registered) continue;
     const int id = static_cast<int>(i) + 1;
-    m.cameras.push_back({id, c.K(0, 0), c.K(1, 1), c.K(0, 2) + 0.5, c.K(1, 2) + 0.5});
+    ColmapModel::Camera cam;
+    cam.id = id;
+    if (i < sizes.size()) {
+      cam.width = sizes[i].width;
+      cam.height = sizes[i].height;
+    }
+    cam.fx = c.K(0, 0);
+    cam.fy = c.K(1, 1);
+    cam.cx = c.K(0, 2) + 0.5;
+    cam.cy = c.K(1, 2) + 0.5;
+    m.cameras.push_back(cam);
     ColmapModel::Image img;
     img.id = id;
     img.q = Eigen::Quaterniond(c.pose.R);
@@ -138,10 +147,10 @@ void write_text(const std::filesystem::path& dir, const ColmapModel& m) {
   for (const auto& c : m.cameras) {
     if (m.dist.any()) {
       std::snprintf(buf, sizeof buf, "%d OPENCV %d %d %.12g %.12g %.12g %.12g %.12g %.12g 0 0\n",
-                    c.id, m.width, m.height, c.fx, c.fy, c.cx, c.cy, m.dist.k1, m.dist.k2);
+                    c.id, c.width, c.height, c.fx, c.fy, c.cx, c.cy, m.dist.k1, m.dist.k2);
     } else {
-      std::snprintf(buf, sizeof buf, "%d PINHOLE %d %d %.12g %.12g %.12g %.12g\n", c.id, m.width,
-                    m.height, c.fx, c.fy, c.cx, c.cy);
+      std::snprintf(buf, sizeof buf, "%d PINHOLE %d %d %.12g %.12g %.12g %.12g\n", c.id, c.width,
+                    c.height, c.fx, c.fy, c.cx, c.cy);
     }
     cams << buf;
   }
@@ -188,8 +197,8 @@ void write_binary(const std::filesystem::path& dir, const ColmapModel& m) {
   for (const auto& c : m.cameras) {
     put<std::int32_t>(cams, c.id);
     put<std::int32_t>(cams, m.dist.any() ? kOpenCv : kPinhole);
-    put<std::uint64_t>(cams, static_cast<std::uint64_t>(m.width));
-    put<std::uint64_t>(cams, static_cast<std::uint64_t>(m.height));
+    put<std::uint64_t>(cams, static_cast<std::uint64_t>(c.width));
+    put<std::uint64_t>(cams, static_cast<std::uint64_t>(c.height));
     for (const double v : {c.fx, c.fy, c.cx, c.cy}) put<double>(cams, v);
     if (m.dist.any()) {
       for (const double v : {m.dist.k1, m.dist.k2, 0.0, 0.0}) put<double>(cams, v);
@@ -242,14 +251,15 @@ void write_colmap_text(const std::filesystem::path& dir, const recon::Reconstruc
                        const std::vector<features::Features>& features,
                        const std::vector<std::string>& names, int width, int height,
                        const std::vector<Rgb>& colours) {
-  write_text(dir, build_model(rec, index, features, names, width, height, colours, {}));
+  const std::vector<ImageSize> sizes(rec.cameras.size(), ImageSize{width, height});
+  write_text(dir, build_model(rec, index, features, names, sizes, colours, {}));
 }
 
 void write_colmap(const std::filesystem::path& dir, const recon::Reconstruction& rec,
                   const recon::TrackIndex& index, const std::vector<features::Features>& features,
-                  const std::vector<std::string>& names, int width, int height,
+                  const std::vector<std::string>& names, const std::vector<ImageSize>& sizes,
                   const std::vector<Rgb>& colours, const recon::Radial& dist) {
-  const ColmapModel m = build_model(rec, index, features, names, width, height, colours, dist);
+  const ColmapModel m = build_model(rec, index, features, names, sizes, colours, dist);
   write_text(dir, m);
   write_binary(dir, m);
 }
@@ -257,8 +267,9 @@ void write_colmap(const std::filesystem::path& dir, const recon::Reconstruction&
 void write_colmap_scene(const std::filesystem::path& dir, const recon::Reconstruction& rec,
                         const recon::TrackIndex& index,
                         const std::vector<features::Features>& features,
-                        const std::vector<std::filesystem::path>& images, int width, int height,
-                        const std::vector<Rgb>& colours, const recon::Radial& dist) {
+                        const std::vector<std::filesystem::path>& images,
+                        const std::vector<ImageSize>& sizes, const std::vector<Rgb>& colours,
+                        const recon::Radial& dist) {
   namespace fs = std::filesystem;
   const fs::path out_images = dir / "images";
   fs::create_directories(out_images);
@@ -269,23 +280,21 @@ void write_colmap_scene(const std::filesystem::path& dir, const recon::Reconstru
     std::string ext = src.extension().string();
     std::transform(ext.begin(), ext.end(), ext.begin(),
                    [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    if (!dist.any() && (ext == ".jpg" || ext == ".jpeg" || ext == ".png")) {
+    const bool upright = data::exif_orientation(src) == 1;
+    if (!dist.any() && upright && (ext == ".jpg" || ext == ".jpeg" || ext == ".png")) {
       names.push_back(src.filename().string());
       std::error_code ec;
       fs::copy_file(src, out_images / names.back(), fs::copy_options::overwrite_existing, ec);
       if (ec) throw IoError("write_colmap_scene: copy " + src.string() + ": " + ec.message());
       continue;
     }
-    names.push_back(src.stem().string() + ".png");  // PPM / PGM, or undistorted images
-    int w = 0;
-    int h = 0;
-    int n = 0;
-    unsigned char* px = stbi_load(src.string().c_str(), &w, &h, &n, 0);
-    if (px == nullptr) {
-      throw IoError("write_colmap_scene: read " + src.string() + ": " + stbi_failure_reason());
-    }
-    std::vector<unsigned char> buf(px, px + static_cast<std::size_t>(w) * h * n);
-    stbi_image_free(px);
+    names.push_back(src.stem().string() + ".png");  // PPM / PGM, rotated or undistorted images
+    // As displayed (EXIF orientation applied), RGB.
+    const data::ImageRgb img = data::load_rgb(src);
+    const int w = img.width;
+    const int h = img.height;
+    const int n = 3;
+    std::vector<unsigned char> buf = img.rgb;
     if (dist.any() && i < rec.cameras.size()) {
       // Each output pixel (ideal, pinhole) takes the recorded pixel the lens put it at (bilinear).
       const Eigen::Matrix3d& K = rec.cameras[i].K;
@@ -318,7 +327,7 @@ void write_colmap_scene(const std::filesystem::path& dir, const recon::Reconstru
     if (ok == 0) throw IoError("write_colmap_scene: cannot write " + names.back());
   }
   // The images are pinhole now: the undistorted keypoints, no distortion parameters.
-  write_colmap(dir / "sparse" / "0", rec, index, features, names, width, height, colours);
+  write_colmap(dir / "sparse" / "0", rec, index, features, names, sizes, colours);
 }
 
 }  // namespace sfm::exporter

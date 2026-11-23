@@ -2,8 +2,11 @@
 
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "sfm/core/error.hpp"
+#include "sfm/data/image_list.hpp"
 
 // The one translation unit that compiles stb_image.
 #define STB_IMAGE_IMPLEMENTATION
@@ -30,6 +33,37 @@ StbiPixels load(const std::filesystem::path& path, int channels, int& width, int
   return px;
 }
 
+// Pixels of a w x h image with `c` channels as displayed under EXIF orientation o (1..8): the
+// stored image rotated / mirrored. Orientations 5-8 swap width and height.
+std::vector<unsigned char> orient(const unsigned char* src, int& w, int& h, int c, int o) {
+  const int W = w;
+  const int H = h;
+  const bool swap = o >= 5;
+  const int ow = swap ? H : W;
+  const int oh = swap ? W : H;
+  std::vector<unsigned char> out(static_cast<std::size_t>(ow) * oh * c);
+  for (int y = 0; y < H; ++y) {
+    for (int x = 0; x < W; ++x) {
+      int dx = x;
+      int dy = y;
+      // 2 mirror left-right, 3 rotate 180, 4 mirror top-bottom, 5 transpose, 6 rotate 90
+      // clockwise, 7 transverse, 8 rotate 90 counter-clockwise.
+      if (o == 2 || o == 3) dx = W - 1 - x;
+      if (o == 3 || o == 4) dy = H - 1 - y;
+      if (o == 5 || o == 8) dx = y;
+      if (o == 6 || o == 7) dx = H - 1 - y;
+      if (o == 5 || o == 6) dy = x;
+      if (o == 7 || o == 8) dy = W - 1 - x;
+      const std::size_t from = (static_cast<std::size_t>(y) * W + x) * c;
+      const std::size_t to = (static_cast<std::size_t>(dy) * ow + dx) * c;
+      for (int k = 0; k < c; ++k) out[to + k] = src[from + k];
+    }
+  }
+  w = ow;
+  h = oh;
+  return out;
+}
+
 }  // namespace
 
 Image8 load_gray(const std::filesystem::path& path) {
@@ -50,6 +84,8 @@ Image8 load_gray(const std::filesystem::path& path) {
       img.pixels[i] = rgb_to_gray(src[3 * i], src[3 * i + 1], src[3 * i + 2]);
     }
   }
+  const int o = exif_orientation(path);
+  if (o != 1) img.pixels = orient(img.pixels.data(), img.width, img.height, 1, o);
   return img;
 }
 
@@ -57,7 +93,12 @@ ImageRgb load_rgb(const std::filesystem::path& path) {
   ImageRgb img;
   const StbiPixels px = load(path, 3, img.width, img.height);
   const std::size_t n = static_cast<std::size_t>(img.width) * static_cast<std::size_t>(img.height);
-  img.rgb.assign(px.get(), px.get() + 3 * n);
+  const int o = exif_orientation(path);
+  if (o != 1) {
+    img.rgb = orient(px.get(), img.width, img.height, 3, o);
+  } else {
+    img.rgb.assign(px.get(), px.get() + 3 * n);
+  }
   return img;
 }
 

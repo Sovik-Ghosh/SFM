@@ -155,10 +155,18 @@ sfm_set_warnings(sfm_export)
 
 # Pipeline: method registry, stage dumps, metrics; used by apps/sfm_run.
 add_library(sfm_pipeline
+  src/pipeline/photos.cpp
   src/pipeline/pipeline.cpp
   src/pipeline/registry.cpp
   src/pipeline/stage_io.cpp)
 add_library(sfm::pipeline ALIAS sfm_pipeline)
+# The template of photo_config() (sfm_run --images, epipole.reconstruct): the tuned bunny config.
+set(SFM_DEFAULT_CONFIG_FILE ${PROJECT_SOURCE_DIR}/configs/bunny_sift_tuned2.json)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${SFM_DEFAULT_CONFIG_FILE})
+file(READ ${SFM_DEFAULT_CONFIG_FILE} SFM_DEFAULT_CONFIG)
+configure_file(src/pipeline/default_config.hpp.in
+               ${CMAKE_CURRENT_BINARY_DIR}/generated/default_config.hpp @ONLY)
+target_include_directories(sfm_pipeline PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(sfm_pipeline PUBLIC sfm::ba sfm::export sfm::recon sfm::features sfm::config
                       sfm::data sfm::eval PRIVATE sfm::json)
 if(SFM_WITH_CUDA)

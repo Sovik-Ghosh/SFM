@@ -3,6 +3,7 @@
 // and the scene export must hold the images and a COLMAP model of the real image size.
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -221,5 +222,86 @@ TEST(E2eBunnyFolder, KnownDistortionIsUndone) {
   std::stringstream text;
   text << cams.rdbuf();
   EXPECT_NE(text.str().find(" OPENCV 1024 768 "), std::string::npos);
+  fs::remove_all(work);
+}
+
+// Portrait and landscape mixed: every third bunny view turned 90 degrees clockwise (768 x 1024),
+// its calibration turned with it (u' = H - 1 - v, v' = u). Same accuracy as all-landscape, each
+// COLMAP camera with its own size. memory.max_images = 4 with last = -1: the cap follows the
+// folder.
+TEST(E2eBunnyFolder, PortraitAndLandscapeMixed) {
+  const fs::path src(SFM_SOURCE_DIR);
+  const fs::path work = fs::temp_directory_path() / "sfm_e2e_bunny_portrait";
+  fs::remove_all(work);
+  for (const char* d : {"images", "masks", "calib"}) fs::create_directories(work / d);
+  for (int i = 0; i < 36; ++i) {
+    char id[8];
+    std::snprintf(id, sizeof id, "%04d", i);
+    const std::string n(id);
+    const fs::path bunny = src / "data/bunny";
+    auto P = sfm::data::read_projection(bunny / "calib" / (n + ".txt"));
+    const auto rgb = sfm::data::load_rgb(bunny / "images" / (n + ".ppm"));
+    const auto sil = sfm::data::load_gray(bunny / "silhouettes" / (n + ".pgm"));
+    int w = rgb.width;
+    int h = rgb.height;
+    std::vector<unsigned char> img = rgb.rgb;
+    std::vector<unsigned char> msk = sil.pixels;
+    if (i % 3 == 0) {  // rotate 90 degrees clockwise: (x, y) -> (h - 1 - y, x)
+      std::vector<unsigned char> ri(img.size());
+      std::vector<unsigned char> rm(msk.size());
+      for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+          const std::size_t to = static_cast<std::size_t>(x) * h + (h - 1 - y);
+          const std::size_t from = static_cast<std::size_t>(y) * w + x;
+          for (int c = 0; c < 3; ++c) ri[3 * to + c] = img[3 * from + c];
+          rm[to] = msk[from];
+        }
+      }
+      Eigen::Matrix3d A;
+      A << 0, -1, h - 1, 1, 0, 0, 0, 0, 1;
+      P = A * P;
+      img.swap(ri);
+      msk.swap(rm);
+      std::swap(w, h);
+    }
+    const std::string size = std::to_string(w) + " " + std::to_string(h);
+    std::ofstream im(work / "images" / ("view_" + n + ".ppm"), std::ios::binary);
+    im << "P6\n" << size << "\n255\n" << std::string(img.begin(), img.end());
+    std::ofstream mk(work / "masks" / ("view_" + n + ".pgm"), std::ios::binary);
+    mk << "P5\n" << size << "\n255\n" << std::string(msk.begin(), msk.end());
+    std::ofstream cal(work / "calib" / ("view_" + n + ".txt"));
+    cal.precision(17);
+    cal << "CONTOUR\n";
+    for (int r = 0; r < 3; ++r) {
+      cal << P(r, 0) << " " << P(r, 1) << " " << P(r, 2) << " " << P(r, 3) << "\n";
+    }
+  }
+  auto cfg = sfm::config::load_config(src / "configs" / "bunny_sift_tuned2.json", src);
+  cfg.run.output_dir = work / "out";
+  cfg.output.dump_stages = false;
+  cfg.output.ply = false;
+  cfg.dataset.root = work;
+  cfg.dataset.images_dir = "images";
+  cfg.dataset.masks_dir = "masks";
+  cfg.dataset.calib_dir = "calib";
+  cfg.dataset.layout = "folder";
+  cfg.dataset.first = 0;
+  cfg.dataset.last = -1;
+  cfg.memory.max_images = 4;
+  std::ostringstream log_text;
+  sfm::core::Logger log(sfm::core::LogLevel::kWarn, &log_text, false);
+  const auto r = sfm::pipeline::run_pipeline(cfg, {}, log);
+  if (!r.metrics || !r.model) {
+    GTEST_FAIL() << "no metrics";
+  }
+  EXPECT_EQ(r.metrics->registered_ids.size(), 36u);
+  EXPECT_LT(r.metrics->rotation_median_deg, 0.25);  // landscape-only: 0.171 deg
+  EXPECT_EQ(r.model->sizes[0], (std::array<int, 2>{768, 1024}));
+  EXPECT_EQ(r.model->sizes[1], (std::array<int, 2>{1024, 768}));
+  std::ifstream cams(r.run_dir / "colmap" / "cameras.txt");
+  std::stringstream text;
+  text << cams.rdbuf();
+  EXPECT_NE(text.str().find("\n1 PINHOLE 768 1024 "), std::string::npos);
+  EXPECT_NE(text.str().find("\n2 PINHOLE 1024 768 "), std::string::npos);
   fs::remove_all(work);
 }

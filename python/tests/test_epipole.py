@@ -23,6 +23,7 @@ assert abs(r.metrics["rotation_error_deg"]["median"] - 0.545) < 0.01, r.metrics
 assert r.points.shape == (r.metrics["points"], 3) and r.colors.shape == r.points.shape
 assert r.colors.dtype == np.uint8 and r.colors.mean() > 50  # real colours (the bunny is orange)
 assert r.registered.sum() == 35 and len(r.names) == 36 and r.names[0] == "0000.ppm"
+assert r.sizes.shape == (36, 2) and tuple(r.sizes[0]) == (1024, 768)
 assert np.allclose(np.einsum("nji,njk->nik", r.R, r.R), np.eye(3), atol=1e-9)
 assert (r.run_dir / "colmap" / "points3D.bin").exists()
 

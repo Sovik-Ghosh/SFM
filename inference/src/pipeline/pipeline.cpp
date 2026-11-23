@@ -446,25 +446,30 @@ RunResult run_once(const config::Config& cfg_in, const RunOptions& opt, core::Lo
   std::vector<data::Image8> gray;
   std::vector<data::Image8> masks;
   const auto files = data::list_images(d);
-  if (cfg.memory.max_images < files.size()) {
+  // A fixed range must fit memory.max_images; "folder" with last = -1 takes every image, so the
+  // cap follows the folder.
+  if (d.last >= 0 && cfg.memory.max_images < files.size()) {
     throw ConfigError("memory.max_images: " + std::to_string(cfg.memory.max_images) +
                       " is less than the " + std::to_string(files.size()) + " images in the range");
   }
   int rotated = 0;
+  std::vector<exporter::ImageSize> sizes;  // per image, as displayed (EXIF orientation applied)
   for (const data::ImageEntry& e : files) {
     ids.push_back(e.id);
     names.push_back(e.name);
-    gray.push_back(data::load_gray(e.image));
-    const bool same_width = gray.back().width == gray.front().width;
-    const bool same_height = gray.back().height == gray.front().height;
-    if (!same_width || !same_height) {
-      throw IoError("image " + e.image.string() + ": size " + std::to_string(gray.back().width) +
-                    "x" + std::to_string(gray.back().height) + " differs from the first image's " +
-                    std::to_string(gray.front().width) + "x" + std::to_string(gray.front().height));
-    }
+    gray.push_back(data::load_gray(e.image));  // images may differ in size (portrait, landscape)
+    sizes.push_back({gray.back().width, gray.back().height});
     gt.push_back(data::load_camera(d, e, gray.back().width, gray.back().height));
     K.push_back(gt.back().K);
-    if (d.use_masks) masks.push_back(data::load_mask(e.mask, d.mask_object_white));
+    if (d.use_masks) {
+      masks.push_back(data::load_mask(e.mask, d.mask_object_white));
+      if (masks.back().width != gray.back().width || masks.back().height != gray.back().height) {
+        throw IoError("mask " + e.mask.string() + ": size " + std::to_string(masks.back().width) +
+                      "x" + std::to_string(masks.back().height) + ", its image " + e.name + " is " +
+                      std::to_string(gray.back().width) + "x" + std::to_string(gray.back().height) +
+                      " (as displayed)");
+      }
+    }
     if (data::exif_orientation(e.image) != 1) ++rotated;
   }
   if (d.camera.enabled()) {
@@ -475,9 +480,7 @@ RunResult run_once(const config::Config& cfg_in, const RunOptions& opt, core::Lo
                                 {"exif", d.camera.exif}});
   }
   if (rotated > 0) {
-    log.warn("dataset.exif_orientation",
-             {{"images", rotated},
-              {"note", "EXIF says these photos are displayed rotated; they are read as stored"}});
+    log.info("dataset.exif_orientation", {{"images", rotated}, {"note", "rotated as displayed"}});
   }
   res.timings.load = seconds_since(t0);
   log.info("stage.load", {{"images", static_cast<int>(ids.size())}, {"seconds", res.timings.load}});
@@ -718,6 +721,7 @@ RunResult run_once(const config::Config& cfg_in, const RunOptions& opt, core::Lo
   {
     RunModel m;
     m.names = names;
+    for (const auto& s : sizes) m.sizes.push_back({s.width, s.height});
     m.k1 = dist.k1;
     m.k2 = dist.k2;
     for (const auto& c : rec.cameras) {
@@ -750,8 +754,6 @@ RunResult run_once(const config::Config& cfg_in, const RunOptions& opt, core::Lo
     const bool any_export = cfg.output.ply || cfg.output.colmap || cfg.output.colmap_scene;
     const std::vector<exporter::Rgb> colours =
         any_export ? track_rgb(final_raw_index, sources) : std::vector<exporter::Rgb>{};
-    const int w = gray.front().width;
-    const int h = gray.front().height;
     if (res.model && !colours.empty()) {
       for (std::size_t t = 0; t < rec.points.size(); ++t) {
         if (rec.has_point[t] != 0) res.model->colours.push_back(colours[t]);
@@ -761,10 +763,10 @@ RunResult run_once(const config::Config& cfg_in, const RunOptions& opt, core::Lo
     if (cfg.output.colmap) {
       // Recorded keypoints with the OPENCV model when there is distortion, else pinhole.
       exporter::write_colmap(res.run_dir / "colmap", rec, final_index,
-                             dist.any() ? feats_raw : feats, names, w, h, colours, dist);
+                             dist.any() ? feats_raw : feats, names, sizes, colours, dist);
     }
     if (cfg.output.colmap_scene) {
-      exporter::write_colmap_scene(res.run_dir / "scene", rec, final_index, feats, sources, w, h,
+      exporter::write_colmap_scene(res.run_dir / "scene", rec, final_index, feats, sources, sizes,
                                    colours, dist);
     }
     res.timings.export_ = seconds_since(t0);

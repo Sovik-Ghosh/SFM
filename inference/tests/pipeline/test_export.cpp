@@ -93,8 +93,13 @@ TEST(Export, ColmapBinaryMatchesText) {
   fs::remove_all(dir);
   std::vector<sfm::exporter::Rgb> colours(30, sfm::exporter::Rgb{10, 20, 30});
   colours[0] = {200, 100, 50};
-  sfm::exporter::write_colmap(dir, rec, idx, in.features, {"a.jpg", "b", "c", "d"}, 1000, 700,
-                              colours);
+  // Image 2 is portrait: each camera carries its own size.
+  std::vector<sfm::exporter::ImageSize> sizes(4, sfm::exporter::ImageSize{1000, 700});
+  sizes[1] = {700, 1000};
+  sfm::exporter::write_colmap(dir, rec, idx, in.features, {"a.jpg", "b", "c", "d"}, sizes, colours);
+  const auto txt_cams = data_lines(dir / "cameras.txt");
+  ASSERT_EQ(txt_cams.size(), 4u);
+  EXPECT_EQ(txt_cams[1].rfind("2 PINHOLE 700 1000 ", 0), 0u) << txt_cams[1];
 
   std::ifstream cams(dir / "cameras.bin", std::ios::binary);
   ASSERT_EQ(get<std::uint64_t>(cams), 4u);
@@ -165,7 +170,8 @@ TEST(Export, ColmapOpenCvModelWithDistortion) {
   auto rec = sfm::recon::reconstruct_incremental(in.pairs, in.features, idx, in.K, ip, {}, nullptr);
   const fs::path dir = fs::temp_directory_path() / "sfm_export_opencv_test";
   fs::remove_all(dir);
-  sfm::exporter::write_colmap(dir, rec, idx, in.features, {"a", "b", "c", "d"}, 1000, 700, {},
+  const std::vector<sfm::exporter::ImageSize> sizes(4, sfm::exporter::ImageSize{1000, 700});
+  sfm::exporter::write_colmap(dir, rec, idx, in.features, {"a", "b", "c", "d"}, sizes, {},
                               sfm::recon::Radial{-0.1, 0.02});
   const auto cams = data_lines(dir / "cameras.txt");
   EXPECT_EQ(cams[0], "1 OPENCV 1000 700 1200 1200 512.5 384.5 -0.1 0.02 0 0");

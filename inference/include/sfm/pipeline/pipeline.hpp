@@ -69,6 +69,8 @@ struct Timings {  // wall seconds per stage (0 when the stage was loaded, not ru
 // stage did not run or wrote nothing (it is read from the images at export).
 struct RunModel {
   std::vector<std::string> names;  // image file names
+  // Width, height per image (as displayed).
+  std::vector<std::array<int, 2>> sizes;
   std::vector<bool> registered;
   std::vector<Eigen::Matrix3d> K;  // pixel centres at integer coordinates
   std::vector<Eigen::Matrix3d> R;  // world -> camera

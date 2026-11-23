@@ -30,8 +30,10 @@ struct SceneOptions {
   ColorMode color = ColorMode::kGray;
   bool frustums = true;
   float frustum_size = 0.4F;  // frustum depth as a fraction of the scene radius
-  int image_width = 1024;     // image size for the frustum aspect (all images share it)
-  int image_height = 768;
+  // Image size for the frustum aspect; 0 = each camera's own, from its principal point (2 c + 1),
+  // so portrait and landscape cameras get their own shape.
+  int image_width = 0;
+  int image_height = 0;
   int selected_camera = -1;  // drawn highlighted (image index)
   // Physical camera per image (CameraGroups::group): frustums in camera_group_color; empty =
   // coloured by registration order.

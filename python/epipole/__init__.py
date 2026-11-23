@@ -35,6 +35,7 @@ class Result:
     """Outcome of a run.
 
     names       image file names, in the run's order (one per image, registered or not)
+    sizes       (N, 2) width, height per image as displayed (EXIF orientation applied)
     registered  bool (N,), which images have a pose
     K, R        (N, 3, 3) intrinsics (pixel centres at integer coordinates) and rotation world->camera
     t           (N, 3) translation: x_camera = R x_world + t
@@ -50,6 +51,7 @@ class Result:
     metrics: Optional[dict]
     timings: dict
     names: list = field(default_factory=list)
+    sizes: np.ndarray = field(default_factory=lambda: np.zeros((0, 2), int))
     registered: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
     K: np.ndarray = field(default_factory=lambda: np.zeros((0, 3, 3)))
     R: np.ndarray = field(default_factory=lambda: np.zeros((0, 3, 3)))
@@ -88,6 +90,7 @@ def run(config: Union[str, os.PathLike, Mapping[str, Any]], *, backend: str = "a
         metrics=json.loads(out["metrics"]) if out.get("metrics") is not None else None,
         timings=json.loads(out["timings"]),
         names=out.get("names", []),
+        sizes=out.get("sizes", np.zeros((0, 2), int)),
         registered=out.get("registered", np.zeros(0, bool)),
         K=out.get("K", np.zeros((0, 3, 3))),
         R=out.get("R", np.zeros((0, 3, 3))),
@@ -104,8 +107,8 @@ def reconstruct(images: Union[str, os.PathLike], *, output_dir: Union[str, os.Pa
                 refine_focal: bool = True, distortion: Optional[tuple] = None,
                 refine_distortion: bool = False, sequential: bool = False, colmap_scene: bool = True,
                 backend: str = "auto", log_level: str = "warn") -> Result:
-    """Reconstructs a folder of photos (JPEG/PNG, any names, taken in name order, one size, one
-    camera).
+    """Reconstructs a folder of photos (JPEG/PNG, any names, taken in name order, one camera;
+    portrait and landscape may be mixed, EXIF orientation is applied).
 
     camera       {"exif": True} (default: focal length from EXIF, else 1.2 x the longer side) or
                  {"fx": ..., "fy": ..., "cx": ..., "cy": ...} in pixels
