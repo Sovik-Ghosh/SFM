@@ -122,7 +122,7 @@ jobs:
       - name: Run the CPU archive on the bunny
         run: |
           tar xzf epipole-*-cpu.tar.gz
-          ./epipole-*-cpu/bin/sfm_version
+          ./epipole-*-cpu/bin/sfm_version || [ $? -eq 2 ]  # exit 2 = no GPU visible, expected here
           ./epipole-*-cpu/bin/sfm_run configs/bunny.json
           python3 -c "import json; m = json.load(open('outputs/bunny-baseline/metrics.json')); assert m['registered'] >= 34, m"
 
