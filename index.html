@@ -24,7 +24,7 @@
   "codeRepository": "https://github.com/Sovik-Ghosh/sfm-cuda",
   "programmingLanguage": ["C++", "CUDA"],
   "license": "https://www.apache.org/licenses/LICENSE-2.0",
-  "version": "1.2.0",
+  "version": "1.3.1",
   "keywords": "structure from motion, SfM, photogrammetry, 3D reconstruction, CUDA, GPU, bundle adjustment, SIFT, COLMAP alternative",
   "author": {"@type": "Person", "name": "Sovik Ghosh"}
 }
@@ -67,7 +67,7 @@ footer { border-top: 1px solid var(--line); margin-top: 64px; padding-top: 20px;
   give the same results. No OpenCV, no Ceres.</p>
   <div class="buttons">
     <a class="primary" href="https://github.com/Sovik-Ghosh/sfm-cuda">Code on GitHub</a>
-    <a href="https://github.com/Sovik-Ghosh/sfm-cuda/releases/latest">Download v1.2.0</a>
+    <a href="https://github.com/Sovik-Ghosh/sfm-cuda/releases/latest">Download v1.3.1</a>
     <a href="https://github.com/Sovik-Ghosh/sfm-cuda/discussions">Discussions</a>
   </div>
 </header>
@@ -93,6 +93,9 @@ with every stage in CUDA:</p>
   <li><b>Reconstruction:</b> initial pair, PnP, multi-view triangulation, outlier filtering, local and
   global bundle adjustment with the Schur complement on the GPU; rigid multi-camera rigs.</li>
   <li><b>Viewer:</b> watch a reconstruction run live, replay it, inspect cameras, compare two runs.</li>
+  <li><b>Python:</b> <code>epipole.reconstruct("photos/")</code> returns camera poses and a coloured point
+  cloud as NumPy arrays (<code>pip install .</code>).</li>
+  <li><b>Cameras:</b> focal length from EXIF and refined; known or estimated radial lens distortion.</li>
   <li><b>Library:</b> use it from your own C++ code (<code>sfm::pipeline::run_pipeline</code>).</li>
 </ul>
 
@@ -110,13 +113,18 @@ with every stage in CUDA:</p>
 <h2>CPU or GPU</h2>
 <table>
   <tr><th>Config</th><th>Images</th><th>CPU</th><th>GPU</th><th>Speed-up</th></tr>
-  <tr><td>Bunny, ORB</td><td class="num">36</td><td class="num">2.3 s</td><td class="num">0.62 s</td><td class="num">3.8×</td></tr>
-  <tr><td>Bunny, SIFT</td><td class="num">36</td><td class="num">26 s</td><td class="num">0.79 s</td><td class="num">33×</td></tr>
-  <tr><td>Middlebury templeRing</td><td class="num">47</td><td class="num">48 s</td><td class="num">3.4 s</td><td class="num">14×</td></tr>
-  <tr><td>ETH3D courtyard (1550×1032)</td><td class="num">38</td><td class="num">292 s</td><td class="num">4.1 s</td><td class="num">71×</td></tr>
-  <tr><td>ETH3D delivery_area, one camera</td><td class="num">237</td><td class="num">105 s</td><td class="num">6.5 s</td><td class="num">16×</td></tr>
+  <tr><td>Bunny, ORB</td><td class="num">36</td><td class="num">1.3 s</td><td class="num">0.62 s</td><td class="num">2.1×</td></tr>
+  <tr><td>Bunny, SIFT</td><td class="num">36</td><td class="num">8.3 s</td><td class="num">0.79 s</td><td class="num">10×</td></tr>
+  <tr><td>Middlebury templeRing</td><td class="num">47</td><td class="num">34 s</td><td class="num">3.4 s</td><td class="num">10×</td></tr>
+  <tr><td>ETH3D courtyard (1550×1032)</td><td class="num">38</td><td class="num">245 s</td><td class="num">4.1 s</td><td class="num">60×</td></tr>
+  <tr><td>ETH3D delivery_area, one camera</td><td class="num">237</td><td class="num">41 s</td><td class="num">6.5 s</td><td class="num">6×</td></tr>
 </table>
 <p class="note">Ryzen 7 9700X (16 threads) against an RTX 5060 Ti; both give the same result on each. Measured with <code>bench_stages</code> (best of 3 after a warm-up; a single <code>sfm_run</code> of the bunny takes 0.9 s), default configs.</p>
+
+<h2>Against COLMAP</h2>
+<p>COLMAP 4.2.1 built with CUDA, on the bunny with the same masks and fixed intrinsics: <b>2.5 s</b> and
+0.28° (extraction, matching and mapping on the GPU), against <b>0.77 s</b> and 0.17° here. On the CPU COLMAP
+takes 4.0 s, Epipole 8.3 s.</p>
 
 <h2>Get started</h2>
 <pre>git clone --depth 1 https://github.com/Sovik-Ghosh/sfm-cuda.git
@@ -124,7 +132,10 @@ cd sfm-cuda
 cmake --preset release &amp;&amp; cmake --build --preset release -j    # CUDA 13, RTX 20xx to 50xx
 # or, without an NVIDIA GPU:  cmake --preset cpu &amp;&amp; cmake --build --preset cpu -j
 ./build/release/inference/apps/sfm_run configs/bunny_sift_tuned2.json
-./build/release/inference/apps/sfm_viewer outputs/bunny-sift-tuned2</pre>
+./build/release/inference/apps/sfm_viewer outputs/bunny-sift-tuned2
+
+# or from Python
+pip install . &amp;&amp; python -c "import epipole; print(epipole.run('configs/bunny_sift_tuned2.json').metrics)"</pre>
 <p>Prebuilt Linux binaries (CPU-only and CUDA) are attached to the
 <a href="https://github.com/Sovik-Ghosh/sfm-cuda/releases/latest">latest release</a>. Your own photos:
 a folder of JPEGs, the focal length from their EXIF data, no renaming; see
@@ -144,7 +155,7 @@ a folder of JPEGs, the focal length from their EXIF data, no renaming; see
 </div>
 
 <footer>
-  Epipole 1.2.0 · Apache 2.0 · <a href="https://github.com/Sovik-Ghosh/sfm-cuda">github.com/Sovik-Ghosh/sfm-cuda</a>
+  Epipole 1.3.1 · Apache 2.0 · <a href="https://github.com/Sovik-Ghosh/sfm-cuda">github.com/Sovik-Ghosh/sfm-cuda</a>
   · Fonts: Gelasio, IBM Plex (SIL Open Font License)
 </footer>
 </main>
